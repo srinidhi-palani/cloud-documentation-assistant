@@ -1,0 +1,1064 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Cloudformation template to create ssi, feeds, crs1.0, crs2.0, capsule api codebuild to its relevant ecr'
+Parameters:
+  ecrimageretain:
+    Description: No.of docker images to retain in each ecr repo
+    Type: String
+    Default: null
+
+  cloudfrontkey:
+    Description: Pem key file name for cloudfront of root user
+    Type: String
+    Default: null
+
+  ssiapiecr:
+    Description: SSI api ecr repo name
+    Type: String
+    Default: null
+
+  feedsapiecr:
+    Description: Feeds api ecr repo name
+    Type: String
+    Default: null
+
+  courseengineapiecr:
+    Description: courseengineapireact ecr repo name
+    Type: String
+    Default: null
+
+  courseengineapiv2ecr:
+    Description: courseengineapiv2 ecr repo name
+    Type: String
+    Default: null
+
+  capsuleengapiecr:
+    Description: capsuleeng api ecr repo name
+    Type: String
+    Default: null
+
+  notifyengapiecr:
+    Description: notification api ecr repo name
+    Type: String
+    Default: null
+
+  ssiapicodebuildecr:
+    Description: SSI api codebuild name
+    Type: String
+    Default: null
+
+  feedsapicodebuildecr:      
+    Description: Feeds api codebuild name
+    Type: String
+    Default: null
+
+  courseengineapicodebuildecr:
+    Description: courseengineapi api codebuild name
+    Type: String
+    Default: null
+
+  courseengineapiv2codebuildecr:
+    Description: courseengineapi2 api codebuild name
+    Type: String
+    Default: null
+
+  capsuleengapicodebuildecr:
+    Description: capsuleengapiecr api codebuild name
+    Type: String
+    Default: null
+
+  notifyengapicodebuildecr:
+    Description: notifyapiecr api codebuild name
+    Type: String
+    Default: null
+
+  SSIGithubRepo:
+    Type: String
+    Description: ssiapi gitgub repo
+    Default: null
+
+  FeedsGithubRepo:
+    Type: String
+    Description: feedsapi github repo       
+    Default: null
+
+  courseengineGithubRepo:
+    Type: String
+    Description: courseengineapi github repo
+    Default: null
+
+  courseenginev2GithubRepo:
+    Type: String
+    Description: courseengineapi v2 github repo
+    Default: null
+
+  capsuleengGithubRepo:
+    Type: String
+    Description: capusleengine api github repo
+    Default: null
+
+  notifyGithubRepo:
+    Type: String
+    Description: notification engine api github repo
+    Default: null
+
+  envbucket:
+    Description: env s3 bucket name for iam permission
+    Type: String
+    Default: null
+
+  ssiapienv:
+    Description: Enter the ssiapi folder path for .env and dockerfile
+    Type: String 
+    Default: null
+
+  feedsapienv:
+    Description: Enter the feedsapi folder path for .env and dockerfile
+    Type: String
+    Default: null
+
+  courseengapienv:
+    Description: Enter the courseengapi folder path for .env and dockerfile
+    Type: String
+    Default: null
+
+  courseengapiv2env:
+    Description: Enter the courseengapiv2api folder path for .env and dockerfile
+    Type: String
+    Default: null
+
+  capsengapienv:
+    Description: Enter the capusle engine api folder path for .env and dockerfile
+    Type: String
+    Default: null
+
+  notifyapienv:
+    Description: Enter the notification api folder path for index.ts and dockerfile
+    Type: String
+    Default: null
+  
+  ssidockerfile:
+    Description: Enter the api dockerfile 
+    Type: String
+    Default: null
+
+  feedsdockerfile:
+    Description: Enter the feeds dockerfile
+    Type: String
+    Default: null
+
+  courseengapidockerfile:
+    Description: Enter the courseengapi dockerfile
+    Type: String
+    Default: null
+
+  courseenginev2dockerfile:
+    Description: Enter the courseenginev2 dockerfile
+    Type: String
+    Default: null
+
+  capsengapidockerfile:
+    Description: Enter the capsuleengapi dockerfile
+    Type: String
+    Default: null
+
+  notifyapidockerfile:
+    Description: Enter the notification api dockerfile
+    Type: String
+    Default: null
+
+  logretention:
+    Type: Number
+    Description: Enter the cloudwatch log retention period in days
+    Default: null
+
+  nodejsreponame:
+    Type: String
+    Description: Enter the nodejs ecr repo name
+    Default: null
+
+  CodeBuildrolename:
+    Description: Enter the codebuild role name 
+    Type: String
+    Default: null
+
+  CodePipelinerolename:
+    Description: Enter the codepipeline role name 
+    Type: String
+    Default: null
+  
+  Codebuildimage:
+    Description: Enter the codebuild compute image
+    Type: String
+    Default: null
+  
+  Codebuildecomputeenvtype:
+    Description: Enter the codebuild compute environment type
+    Type: String
+    Default: null
+Resources:
+  SSIECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ssiapiecr
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+            {
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Retaining the first ${ecrimageretain} images",
+                        "selection": {
+                            "tagStatus": "any",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": ${ecrimageretain}
+                        },
+                        "action": {
+                            "type": "expire"
+                        }
+                    }
+                ]
+            }  
+      RepositoryPolicyText: !Sub |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AllowPushPull",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                  },
+                  "Action": [
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:PutImage",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload"
+                  ]
+                }
+              ]
+            }
+
+  Feeds:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref feedsapiecr
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+            {
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Retaining the first ${ecrimageretain} images",
+                        "selection": {
+                            "tagStatus": "any",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": ${ecrimageretain}
+                        },
+                        "action": {
+                            "type": "expire"
+                        }
+                    }
+                ]
+            }
+      RepositoryPolicyText: !Sub |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AllowPushPull",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                  },
+                  "Action": [
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:PutImage",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload"
+                  ]
+                }
+              ]
+            }
+
+  Courseengine:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref courseengineapiecr
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+            {
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Retaining the first ${ecrimageretain} images",
+                        "selection": {
+                            "tagStatus": "any",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": ${ecrimageretain}
+                        },
+                        "action": {
+                            "type": "expire"
+                        }
+                    }
+                ]
+            }
+      RepositoryPolicyText: !Sub |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AllowPushPull",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                  },
+                  "Action": [
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:PutImage",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload"
+                  ]
+                }
+              ]
+            }
+
+  Courseenginev2:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref courseengineapiv2ecr
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+            {
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Retaining the first ${ecrimageretain} images",
+                        "selection": {
+                            "tagStatus": "any",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": ${ecrimageretain}
+                        },
+                        "action": {
+                            "type": "expire"
+                        }
+                    }
+                ]
+            }
+      RepositoryPolicyText: !Sub |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AllowPushPull",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                  },
+                  "Action": [
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:PutImage",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload"
+                  ]
+                }
+              ]
+            }
+
+  Capsuleeng:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref capsuleengapiecr
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+            {
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Retaining the first ${ecrimageretain} images",
+                        "selection": {
+                            "tagStatus": "any",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": ${ecrimageretain}
+                        },
+                        "action": {
+                            "type": "expire"
+                        }
+                    }
+                ]
+            }
+      RepositoryPolicyText: !Sub |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AllowPushPull",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                  },
+                  "Action": [
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:PutImage",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload"
+                  ]
+                }
+              ]
+            }
+
+  Notification:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref notifyengapiecr
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+            {
+                "rules": [
+                    {
+                        "rulePriority": 1,
+                        "description": "Retaining the first ${ecrimageretain} images",
+                        "selection": {
+                            "tagStatus": "any",
+                            "countType": "imageCountMoreThan",
+                            "countNumber": ${ecrimageretain}
+                        },
+                        "action": {
+                            "type": "expire"
+                        }
+                    }
+                ]
+            }
+      RepositoryPolicyText: !Sub |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "AllowPushPull",
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+                  },
+                  "Action": [
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:PutImage",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload"
+                  ]
+                }
+              ]
+            }
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    DependsOn: Codebuildpolicy
+    Properties:
+      RoleName: !Sub ${CodeBuildrolename}-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref Codebuildpolicy
+
+  Codebuildpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${CodeBuildrolename}-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Sub ${AWS::Region}
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents" 
+            Resource: 
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*
+          - Effect: Allow
+            Action:
+              - ecr:ListImages                  
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+            Resource:
+              - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${nodejsreponame}
+              - !GetAtt 'SSIECR.Arn'
+              - !GetAtt 'Feeds.Arn'
+              - !GetAtt 'Courseengine.Arn'
+              - !GetAtt 'Courseenginev2.Arn'
+              - !GetAtt 'Capsuleeng.Arn'
+              - !GetAtt 'Notification.Arn'
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+              - s3:GetObjectVersion
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+            Resource:
+              - !Sub "arn:aws:s3:::${envbucket}"
+              - !Sub "arn:aws:s3:::${envbucket}/*"
+              - !Sub "arn:aws:s3:::codepipeline-${AWS::Region}-${AWS::AccountId}-artifact"
+              - !Sub "arn:aws:s3:::codepipeline-${AWS::Region}-${AWS::AccountId}-artifact/*"
+          - Effect: Allow
+            Action: 
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:GetParametersByPath
+              - ssm:PutParameter
+            Resource: 
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+          - Effect: Allow
+            Action: 
+              - cloudformation:*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+              - s3:GetObjectVersion
+              - s3:GetBucketAcl
+              - s3:GetBucketLocation
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:GetRole
+              - iam:UpdateAssumeRolePolicy
+              - iam:PutRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - iam:DeleteRolePolicy
+            Resource: "*"
+          - Effect: Allow
+            Action: 
+              - ec2:DescribeVpnGateways
+              - ec2:CreateNetworkInterfacePermission
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeNatGateways
+              - ec2:DescribeRouteTables
+              - ec2:DescribeNetworkInterfaces
+              - ec2:CreateNetworkInterface
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeNetworkInterfaceAttribute
+              - ec2:ModifyNetworkInterfaceAttribute
+            Resource: "*"
+            Condition:
+              StringEquals:
+                ec2:Region:  !Sub "${AWS::Region}"
+
+  ssiapiloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${ssiapicodebuildecr}
+      RetentionInDays: !Ref logretention
+
+  SSIAPICodeBuildECR:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'ssiapicodebuildecr'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL 
+        Type: !Ref Codebuildecomputeenvtype
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: !Ref Codebuildimage
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref ssiapiloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref SSIGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+             version: 0.2
+             env:
+               variables:
+                 REPOSITORY_URI: "${SSIECR.RepositoryUri}"
+             phases:
+               install:
+                 commands:
+                   - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+                   - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+               pre_build:
+                 commands:
+                   - aws s3 cp ${ssiapienv} . --recursive
+                   - mv ${cloudfrontkey} shared/${cloudfrontkey}
+                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                   - echo Logged in to Amazon ECR...
+               build:
+                 commands:
+                   - echo Building Docker image...
+                   - tag=$(TZ="Asia/Kolkata" date +%d-%m-%y_%k-%M | sed 's/[[:space:]]//g')
+                   - docker build -f ${ssidockerfile} -t $REPOSITORY_URI:$tag .
+                   - echo Completed building the image...
+               post_build:
+                 commands:
+                   - echo Pushing the Docker image...
+                   - docker push $REPOSITORY_URI:$tag
+                   - echo Writing image definitions file...
+                   - printf '[{"name":"ssi","imageUri":"%s"}]' $REPOSITORY_URI:$tag > imagedefinitions.json
+                   - cat imagedefinitions.json
+                   - echo Completed pushing the image to ECR...
+             artifacts:
+                 files:
+                   - imagedefinitions.json
+
+  feedsapiloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${feedsapicodebuildecr}
+      RetentionInDays: !Ref logretention
+
+  FeedsAPICodeBuildECR:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'feedsapicodebuildecr'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: !Ref Codebuildecomputeenvtype
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: !Ref Codebuildimage
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref feedsapiloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref FeedsGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+             version: 0.2
+             env:
+               variables:
+                 REPOSITORY_URI: "${Feeds.RepositoryUri}"
+             phases:
+               install:
+                 commands:
+                   - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+                   - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+               pre_build:
+                 commands:
+                   - aws s3 cp ${feedsapienv} . --recursive
+                   - mv ${cloudfrontkey} shared/${cloudfrontkey}                     
+                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                   - echo Logged in to Amazon ECR...
+               build:
+                 commands:
+                   - echo Building Docker image...
+                   - tag=$(TZ="Asia/Kolkata" date +%d-%m-%y_%k-%M | sed 's/[[:space:]]//g')
+                   - docker build -f ${feedsdockerfile} -t $REPOSITORY_URI:$tag .
+                   - echo Completed building the image...
+               post_build:
+                 commands:
+                   - echo Pushing the Docker image...
+                   - docker push $REPOSITORY_URI:$tag
+                   - echo Writing image definitions file...
+                   - printf '[{"name":"feeds","imageUri":"%s"}]' $REPOSITORY_URI:$tag > imagedefinitions.json
+                   - cat imagedefinitions.json
+                   - echo Completed pushing the image to ECR...
+             artifacts:
+                 files:
+                   - imagedefinitions.json
+
+  courseengineapiloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${courseengineapicodebuildecr}
+      RetentionInDays: !Ref logretention
+
+  CourseengineAPICodeBuildECR:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'courseengineapicodebuildecr'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: !Ref Codebuildecomputeenvtype
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: !Ref Codebuildimage
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref courseengineapiloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref courseengineGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+             version: 0.2
+             env:
+               variables:
+                 REPOSITORY_URI: "${Courseengine.RepositoryUri}"
+             phases:
+               install:
+                 commands:
+                   - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+                   - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+               pre_build:
+                 commands:
+                   - aws s3 cp ${courseengapienv} . --recursive
+                   - mv ${cloudfrontkey} shared/${cloudfrontkey}                     
+                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                   - echo Logged in to Amazon ECR...
+               build:
+                 commands:
+                   - echo Building Docker image...
+                   - tag=$(TZ="Asia/Kolkata" date +%d-%m-%y_%k-%M | sed 's/[[:space:]]//g')
+                   - docker build -f ${courseengapidockerfile} -t $REPOSITORY_URI:$tag .
+                   - echo Completed building the image...
+               post_build:
+                 commands:
+                   - echo Pushing the Docker image...
+                   - docker push $REPOSITORY_URI:$tag
+                   - echo Writing image definitions file...
+                   - printf '[{"name":"courseengine","imageUri":"%s"}]' $REPOSITORY_URI:$tag > imagedefinitions.json
+                   - cat imagedefinitions.json
+                   - echo Completed pushing the image to ECR...
+             artifacts:
+                 files:
+                   - imagedefinitions.json
+
+  courseenginev2apiloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${courseengineapiv2codebuildecr}
+      RetentionInDays: !Ref logretention
+  
+  CourseengineAPIv2CodeBuildECR:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'courseengineapiv2codebuildecr'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: !Ref Codebuildecomputeenvtype
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: !Ref Codebuildimage
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref courseenginev2apiloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref courseenginev2GithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+             version: 0.2
+             env:
+               variables:
+                 REPOSITORY_URI: "${Courseenginev2.RepositoryUri}"
+             phases:
+               install:
+                 commands:
+                   - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+                   - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+               pre_build:
+                 commands:
+                   - aws s3 cp ${courseengapiv2env} . --recursive
+                   - mv ${cloudfrontkey} shared/${cloudfrontkey}                     
+                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                   - echo Logged in to Amazon ECR...
+               build:
+                 commands:
+                   - echo Building Docker image...
+                   - tag=$(TZ="Asia/Kolkata" date +%d-%m-%y_%k-%M | sed 's/[[:space:]]//g')
+                   - docker build -f ${courseenginev2dockerfile} -t $REPOSITORY_URI:$tag .
+                   - echo Completed building the image...
+               post_build:
+                 commands:
+                   - echo Pushing the Docker image...
+                   - docker push $REPOSITORY_URI:$tag
+                   - echo Writing image definitions file...
+                   - printf '[{"name":"courseenginev2","imageUri":"%s"}]' $REPOSITORY_URI:$tag > imagedefinitions.json
+                   - cat imagedefinitions.json
+                   - echo Completed pushing the image to ECR...
+             artifacts:
+                 files:
+                   - imagedefinitions.json
+
+  capsuleengineapiloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${capsuleengapicodebuildecr}
+      RetentionInDays: !Ref logretention
+
+  CapsulerengineAPICodeBuildECR:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'capsuleengapicodebuildecr'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: !Ref Codebuildecomputeenvtype
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: !Ref Codebuildimage
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref capsuleengineapiloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref capsuleengGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+             version: 0.2
+             env:
+               variables:
+                 REPOSITORY_URI: "${Capsuleeng.RepositoryUri}"
+             phases:
+               install:
+                 commands:
+                   - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+                   - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+               pre_build:
+                 commands:
+                   - aws s3 cp ${capsengapienv} . --recursive
+                   - mv ${cloudfrontkey} shared/${cloudfrontkey}
+                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                   - echo Logged in to Amazon ECR...
+               build:
+                 commands:
+                   - echo Building Docker image...
+                   - tag=$(TZ="Asia/Kolkata" date +%d-%m-%y_%k-%M | sed 's/[[:space:]]//g')
+                   - docker build -f ${capsengapidockerfile} -t $REPOSITORY_URI:$tag .
+                   - echo Completed building the image...
+               post_build:
+                 commands:
+                   - echo Pushing the Docker image...
+                   - docker push $REPOSITORY_URI:$tag
+                   - echo Writing image definitions file...
+                   - printf '[{"name":"capsuleengine","imageUri":"%s"}]' $REPOSITORY_URI:$tag > imagedefinitions.json
+                   - cat imagedefinitions.json
+                   - echo Completed pushing the image to ECR...
+             artifacts:
+                 files:
+                   - imagedefinitions.json
+
+  notifyapiloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${notifyengapicodebuildecr}
+      RetentionInDays: !Ref logretention
+
+  NotifyAPICodeBuildECR:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref 'notifyengapicodebuildecr'
+      ServiceRole: !GetAtt 'CodeBuildRole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: !Ref Codebuildecomputeenvtype
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: !Ref Codebuildimage
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref notifyapiloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref notifyGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+             version: 0.2
+             env:
+               variables:
+                 REPOSITORY_URI: "${Notification.RepositoryUri}"
+             phases:
+               install:
+                 commands:
+                   - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+                   - timeout 15 sh -c "until docker info; do echo .; sleep 1; done"
+               pre_build:
+                 commands:
+                   - aws s3 cp ${notifyapienv} . --recursive
+                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                   - echo Logged in to Amazon ECR...
+               build:
+                 commands:
+                   - echo Building Docker image...
+                   - tag=$(TZ="Asia/Kolkata" date +%d-%m-%y_%k-%M | sed 's/[[:space:]]//g')
+                   - docker build -f ${notifyapidockerfile} -t $REPOSITORY_URI:$tag .
+                   - echo Completed building the image...
+               post_build:
+                 commands:
+                   - echo Pushing the Docker image...
+                   - docker push $REPOSITORY_URI:$tag
+                   - echo Writing image definitions file...
+                   - printf '[{"name":"notify","imageUri":"%s"}]' $REPOSITORY_URI:$tag > imagedefinitions.json
+                   - cat imagedefinitions.json
+                   - echo Completed pushing the image to ECR...
+             artifacts:
+                 files:
+                   - imagedefinitions.json
+
+  CodePipelineECSAPIdeployRole:
+    Type: AWS::IAM::Role
+    DependsOn: Codepipelinepolicy
+    Properties:
+      RoleName: !Sub ${CodePipelinerolename}-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref Codepipelinepolicy
+
+  Codepipelinepolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${CodePipelinerolename}-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+              - 'codecommit:CancelUploadArchive'
+              - 'codecommit:GetBranch'
+              - 'codecommit:GetCommit'
+              - 'codecommit:GetUploadArchiveStatus'
+              - 'codecommit:UploadArchive'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Sub ${AWS::Region}
+          - Effect: Allow
+            Action:
+              - 'codebuild:BatchGetBuilds'
+              - 'codebuild:StartBuild'
+            Resource:
+              - !GetAtt 'SSIAPICodeBuildECR.Arn'
+              - !GetAtt 'FeedsAPICodeBuildECR.Arn'
+              - !GetAtt 'CourseengineAPICodeBuildECR.Arn'
+              - !GetAtt 'CourseengineAPIv2CodeBuildECR.Arn'
+              - !GetAtt 'CapsulerengineAPICodeBuildECR.Arn'
+              - !GetAtt 'NotifyAPICodeBuildECR.Arn'
+          - Effect: Allow
+            Action:
+              - 'iam:PassRole'                  
+              - 'codestar-connections:UseConnection'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'appconfig:StartDeployment'
+              - 'appconfig:GetDeployment'
+              - 'appconfig:StopDeployment'
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'ec2:*'
+              - 'elasticloadbalancing:*'
+              - 'autoscaling:*'
+              - 'cloudwatch:*'
+              - 's3:*'
+              - 'sns:*'
+              - 'cloudformation:*'
+              - 'ecs:*'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Sub ${AWS::Region}
+Outputs:
+  CodePipelineECSAPIdeployRole:
+    Description: ECS CodePipeline role arn
+    Value: !Ref CodePipelineECSAPIdeployRole
+    Export:
+      Name: CodePipelineECSapi-role

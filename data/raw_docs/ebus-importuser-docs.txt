@@ -1,0 +1,42 @@
+Template: ebus-importuser.yml
+Category: EventBridge / API Destinations / SQS
+
+Purpose:
+This template creates an EventBridge infrastructure for user import workflows. It creates a custom EventBridge bus with multiple API destinations and rules to handle batch and individual user import operations including channel and course assignments.
+
+AWS Services Used:
+- Amazon EventBridge: Custom event bus and rules for user import events
+- AWS Events Connection: API Key authenticated connection
+- AWS Events API Destinations: HTTP endpoints for import operations
+- Amazon SQS: Dead letter queue for failed import events
+- AWS IAM: Role for EventBridge to invoke API destinations
+- AWS CloudWatch Logs: Logging for EventBridge rules
+
+Key Features:
+- Custom EventBridge bus for user import events
+- API Key authentication for all API destinations
+- Multiple import workflows: batch users, individual users, channel/course assignments
+- Dead letter queue for failed event processing
+- CodeBuild role integration
+
+API Destinations:
+- importBatchUsersAssignChannels: Assign channels to batch imported users
+- importBatchUsersCreate: Create batch users
+- importUserSendInvitation: Send invitation to individual user
+- importUserCreate: Create individual user
+- importUserAssignChannels: Assign channels to individual user
+- importUserAssignCourses: Assign courses to individual user
+- importBatchUsersAssignCourses: Assign courses to batch users
+
+Parameters:
+- Busname: Custom EventBridge bus name
+- apikeyname: API Key header name for authentication
+- apikeyvalue: API Key value (NoEcho for security)
+- sqsdlqueue: SQS dead letter queue name
+- Various endpoint URLs for each import operation
+
+Use Cases:
+- Bulk user import from external systems
+- Automated user onboarding workflows
+- Channel and course assignment automation
+- Event-driven user management

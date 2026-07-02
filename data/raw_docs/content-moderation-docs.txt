@@ -1,0 +1,40 @@
+Template: content-moderation.yaml
+Category: Lambda / EventBridge / API Gateway / Content Moderation
+
+Purpose:
+This template creates a content moderation pipeline that automatically scans uploaded images, videos, and text for inappropriate content. It uses Lambda functions triggered by EventBridge events to moderate content before it is published.
+
+AWS Services Used:
+- AWS Lambda: Three separate functions for image, video, and text moderation
+- Amazon EventBridge: Event-driven triggers for moderation workflows
+- Amazon API Gateway: REST API for moderation requests
+- Amazon S3: Source bucket for content assets
+- Amazon CloudFront: CDN for serving approved content
+- AWS CloudWatch Logs: Logging for moderation results
+
+Key Features:
+- Separate Lambda functions for image, video, and text moderation
+- EventBridge-driven event processing
+- Integration with external moderation API (Hive API)
+- Configurable asset folder paths for images and videos
+- API Key authentication for external moderation service
+- CloudWatch logging for audit trail
+
+Parameters:
+- lambdacontentmodimage: Lambda function name for image moderation
+- lambdacontentmodvideo: Lambda function name for video moderation
+- lambdacontentmodtext: Lambda function name for text moderation
+- ebusname: EventBridge custom bus name
+- contentassetbucket: S3 bucket containing content to moderate
+- feedscloudfronturl: CloudFront URL for feeds content
+- imageassetfolder: S3 prefix folder for image assets
+- videoassetfolder: S3 prefix folder for video assets
+- hiveapikey: External Hive moderation API key
+- contmodapiendpoint: Content moderation POST endpoint
+- feedsapiendpoint: Feeds API endpoint for status updates
+
+Use Cases:
+- Automatically moderate user-generated content before publishing
+- Scan uploaded images and videos for inappropriate content
+- Flag or reject text content that violates community guidelines
+- Integrate with external content moderation services

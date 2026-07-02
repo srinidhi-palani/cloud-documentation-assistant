@@ -1,0 +1,35 @@
+Template: ebus-trialsignup.yml
+Category: EventBridge / API Destinations / Scheduler
+
+Purpose:
+This template creates an EventBridge infrastructure for trial signup workflows including email notifications via SendGrid, trial registration, and scheduled user expiry processing.
+
+AWS Services Used:
+- Amazon EventBridge: Custom event bus for trial signup events
+- AWS Events Connection: API Key authenticated connections
+- AWS Events API Destinations: Email and trial service endpoints
+- Amazon EventBridge Scheduler: Cron-based user expiry processing
+- AWS CloudWatch Logs: Logging for event processing
+
+Key Features:
+- Custom EventBridge bus for trial signup events
+- SendGrid integration for email notifications
+- Scheduled user expiry via cron expression
+- Configurable timezone for expiry scheduler (UTC or Asia/Calcutta)
+- Multiple API destinations for email and trial services
+
+Parameters:
+- Busname: Custom EventBridge bus name
+- apikeyname / apikeyvalue: API Key authentication
+- sendgridkey: SendGrid API key for email (NoEcho)
+- emailendpoint: Email service endpoint URL
+- trailsignupendpoint: Trial signup service endpoint
+- userexpirycron: Cron expression for user expiry job
+- userexpirycrontimezone: Timezone for cron (UTC or Asia/Calcutta)
+- logretention: CloudWatch log retention days
+
+Use Cases:
+- Automate trial user signup workflows
+- Send welcome emails via SendGrid on signup
+- Automatically expire trial users on schedule
+- Event-driven trial management

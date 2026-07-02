@@ -1,0 +1,389 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Creating an eventbridge for userimport"
+Parameters:
+  Busname:
+    Default: null
+    Description: Name of the custom eventbridge bus
+    Type: String
+
+  apikeyname:
+    Default: null
+    Description: API connection key name
+    Type: String
+
+  apikeyvalue:
+    Default: null
+    Description: API connection key value 
+    Type: String
+    NoEcho: true
+
+  importBatchUsersAssignChannelsEndpoint:
+    Default: null
+    Description: URL & Endpoint for importBatchUsersAssignChannels
+    Type: String
+
+  importBatchUsersCreateEndpoint:
+    Default: null
+    Description: URL & Endpoint for importBatchUsersCreate
+    Type: String
+
+  importUserSendInvitationEndpoint:
+    Default: null
+    Description: URL & Endpoint for importUserSendInvitation
+    Type: String
+
+  importUserCreateEndpoint:
+    Default: null
+    Description: URL & Endpoint for importUserCreate
+    Type: String 
+
+  importUserAssignChannelsEndpoint:
+    Default: null
+    Description: URL & Endpoint for importUserAssignChannels
+    Type: String
+
+  importUserAssignCoursesEndpoint:
+    Default: null
+    Description: URL & Endpoint for importUserAssignCourses
+    Type: String
+
+  importBatchUsersAssignCoursesEndpoint:
+    Default: null
+    Description: URL & Endpoint for importBatchUsersAssignCourses
+    Type: String
+
+  sqsdlqueue:
+    Default: null
+    Description: sqs dead letter queue name for importuser
+    Type: String
+
+  CodeBuildrolename:
+    Description: Codebuild role name
+    Type: String
+    Default: null
+Resources:
+  CustomEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref Busname
+
+  uichaconnection:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "userimportchannel"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  uiconconnection:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "userimportconnection"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  uiproductconnection:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "userimportproduct"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  sendinvitationconnection:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "sendinvitation"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  importBatchUsersAssignChannelsApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importBatchUsersAssignChannels"
+      ConnectionArn: !GetAtt sendinvitationconnection.Arn
+      InvocationEndpoint: !Ref importBatchUsersAssignChannelsEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  importBatchUsersCreateApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importBatchUsersCreate"
+      ConnectionArn: !GetAtt uichaconnection.Arn
+      InvocationEndpoint: !Ref importBatchUsersCreateEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  importUserSendInvitationApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importUserSendInvitation"
+      ConnectionArn: !GetAtt sendinvitationconnection.Arn
+      InvocationEndpoint: !Ref importUserSendInvitationEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  importUserCreateApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importUserCreate"
+      ConnectionArn: !GetAtt uiconconnection.Arn
+      InvocationEndpoint: !Ref importUserCreateEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  importUserAssignChannelsApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importUserAssignChannels"
+      ConnectionArn: !GetAtt uichaconnection.Arn
+      InvocationEndpoint: !Ref importUserAssignChannelsEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  importUserAssignCoursesApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importUserAssignCourses"
+      ConnectionArn: !GetAtt uiproductconnection.Arn
+      InvocationEndpoint: !Ref importUserAssignCoursesEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  importBatchUsersAssignCoursesApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "importBatchUsersAssignCourses"
+      ConnectionArn: !GetAtt sendinvitationconnection.Arn
+      InvocationEndpoint: !Ref importBatchUsersAssignCoursesEndpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  ImportuserLogsGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/events/importuser
+      RetentionInDays: 60
+
+  IAMApidest:
+    Type: AWS::IAM::Role
+    DependsOn: CodeBuildpolicy
+    Properties:
+      RoleName: !Sub ${CodeBuildrolename}-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref CodeBuildpolicy
+
+  CodeBuildpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${CodeBuildrolename}-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - events:InvokeApiDestination
+          Resource:
+          - !GetAtt importBatchUsersAssignChannelsApiDest.Arn
+          - !GetAtt importBatchUsersCreateApiDest.Arn
+          - !GetAtt importUserSendInvitationApiDest.Arn
+          - !GetAtt importUserCreateApiDest.Arn
+          - !GetAtt importUserAssignChannelsApiDest.Arn
+          - !GetAtt importUserAssignCoursesApiDest.Arn
+          - !GetAtt importBatchUsersAssignCoursesApiDest.Arn
+        - Effect: Allow
+          Action:
+          - logs:CreateLogGroup
+          Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+        - Effect: Allow
+          Action:
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/importuser"
+
+  importUserBatchCreatedER:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "importUserBatchCreated"
+      EventPattern: "{\"source\":[\"importuser-api\"],\"detail-type\":[\"importuser-batch-created\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt importBatchUsersAssignChannelsApiDest.Arn
+          HttpParameters: 
+             HeaderParameters: {}
+             QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserBatchCreated1
+        - Arn: !GetAtt importBatchUsersAssignCoursesApiDest.Arn
+          HttpParameters: 
+             HeaderParameters: {}
+             QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserBatchCreated2
+      EventBusName: !Ref CustomEventBus
+
+  importUserBatchProcessedER:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "importUserBatchProcessed"
+      EventPattern: "{\"source\":[\"importuser-api\"],\"detail-type\":[\"importuser-batch-processed\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/importuser"
+          Id: importUserBatchProcessed1
+        - Arn: !GetAtt importBatchUsersCreateApiDest.Arn
+          HttpParameters: 
+             HeaderParameters: {}
+             QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserBatchProcessed2
+      EventBusName: !Ref CustomEventBus
+
+  importUserCreatedER:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "importUserCreated"
+      EventPattern: "{\"source\":[\"importuser-api\"],\"detail-type\":[\"importuser-created\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt importUserAssignChannelsApiDest.Arn
+          HttpParameters: 
+            HeaderParameters: {}
+            QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserCreated1
+        - Arn: !GetAtt importUserSendInvitationApiDest.Arn
+          HttpParameters: 
+            HeaderParameters: {}
+            QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserCreated2
+        - Arn: !GetAtt importUserAssignCoursesApiDest.Arn
+          HttpParameters: 
+            HeaderParameters: {}
+            QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserCreated3
+      EventBusName: !Ref CustomEventBus
+
+  importUserMailProcessedER:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "importUserMailProcessed"
+      EventPattern: "{\"source\":[\"importuser-api\"],\"detail-type\":[\"importuser-mail-processed\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt importUserSendInvitationApiDest.Arn
+          HttpParameters: 
+            HeaderParameters: {}
+            QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserMailProcessed1
+      EventBusName: !Ref CustomEventBus
+
+  importUserProcessDataCreatedER:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "importUserProcessDataCreated"
+      EventPattern: "{\"source\":[\"importuser-api\"],\"detail-type\":[\"importuser-processdata-created\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt importUserCreateApiDest.Arn
+          HttpParameters: 
+            HeaderParameters: {}
+            QueryStringParameters: {}
+          RoleArn: !GetAtt IAMApidest.Arn
+          Id: importUserProcessDataCreated1
+      EventBusName: !Ref CustomEventBus
+
+#  EventParameter:
+#    Type: AWS::SSM::Parameter
+#    Properties:
+#      Name: eventBusName
+#      Type: String
+#      Value: !GetAtt CustomEventBus.Arn
+#      Description: Arn of eventbus from eventbridge
+
+  deadletterqueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref sqsdlqueue
+
+  dqueuepolicy:
+    Type: "AWS::SQS::QueuePolicy"
+    Properties:
+      Queues:
+        - !Ref deadletterqueue
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: SQS:*
+            Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${sqsdlqueue}
+          - Sid: AWSEvents_importUserBatchProcessed_dlq_Idd46af5b6-275c-4e00-817b-cf085d690bb8
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${sqsdlqueue}
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${Busname}/importUserBatchProcessed
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${sqsdlqueue}
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${Busname}/importUserBatchCreated
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${sqsdlqueue}
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Sub arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${Busname}/importUserMailProcessed
+  
+Outputs:
+  EventBus:
+    Value: !Ref CustomEventBus
+  importUserBatchCreated:
+    Value: !GetAtt importUserBatchCreatedER.Arn
+  importUserBatchProcessed:
+    Value: !GetAtt importUserBatchProcessedER.Arn
+  importUserCreated:
+    Value: !GetAtt importUserCreatedER.Arn
+  importUserMailProcessed:
+    Value: !GetAtt importUserMailProcessedER.Arn
+  importUserProcessDataCreated:
+    Value: !GetAtt importUserProcessDataCreatedER.Arn
+  iamrole:
+    Value: !GetAtt IAMApidest.Arn

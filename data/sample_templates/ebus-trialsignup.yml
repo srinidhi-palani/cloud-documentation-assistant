@@ -1,0 +1,259 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Creating an eventbridge for trialsignup"
+Parameters:
+  Busname:
+    Default: null
+    Description: Name of the custom eventbridge bus
+    Type: String
+
+  apikeyname:
+    Default: null
+    Description: API connection key name
+    Type: String
+
+  apikeyvalue:
+    Default: null
+    Description: API connection key value 
+    NoEcho: true
+    Type: String
+
+  sendgridkey:
+    Default: null
+    Description: Enter the sendgridkey
+    NoEcho: true
+    Type: String
+
+  emailendpoint:
+    Default: null
+    Description: URL & Endpoint for email service
+    Type: String
+
+  trailsignupendpoint:
+    Default: null
+    Description: URL & Endpoint for trail service
+    Type: String
+  
+  userexpirycron:
+    Default: null
+    Description: Enter the cron expression for user expiry
+    Type: String
+  
+  userexpirycrontimezone:
+    Default: null
+    Description: Enter the cron timezone for user expiry
+    Type: String
+    AllowedValues:
+      - "UTC"
+      - "Asia/Calcutta"
+
+  logretention:
+    Type: Number
+    Description: Enter the cloudwatch log retention period in days
+    Default: null
+Resources:
+  CustomEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref Busname
+
+  eventconnection:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "con-trial-sign-up"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  trialsignupApiDest1:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "dist-trial-sign-up"
+      ConnectionArn: !GetAtt eventconnection.Arn
+      InvocationEndpoint: !Ref emailendpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  trialsignupApiDest2:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "trialsignup-userexpiry"
+      ConnectionArn: !GetAtt eventconnection.Arn
+      InvocationEndpoint: !Ref trailsignupendpoint
+      HttpMethod: "PUT"
+      InvocationRateLimitPerSecond: 300
+      
+  trialsignuploggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/events/${Busname}
+      RetentionInDays: !Ref logretention
+
+  IAMtrialApidest:
+    Type: AWS::IAM::Role
+    DependsOn: trialebusmanagedpolicy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+               - events.amazonaws.com
+               - scheduler.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      RoleName: !Sub eb-trialsignup-${AWS::Region}
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref trialebusmanagedpolicy
+
+  trialebusmanagedpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ebus-notification-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+            - events:PutEvents
+            Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/${Busname}"
+          - Effect: Allow
+            Action:
+            - events:InvokeApiDestination
+            Resource:
+            - !GetAtt trialsignupApiDest1.Arn
+            - !GetAtt trialsignupApiDest2.Arn
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/${Busname}"
+
+  trialsignupruleER1:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "ruleTrialSignUp-Email-Verify"
+      EventPattern: "{\"source\":[\"trial-sign-up-email-verify-api\"],\"detail-type\":[\"trial-sign-up-email-verify-process\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt trialsignupApiDest1.Arn
+          HttpParameters: 
+             HeaderParameters: {}
+             QueryStringParameters: {}
+          RoleArn: !GetAtt IAMtrialApidest.Arn
+          Id: trialsignup-1
+        - Arn: !GetAtt trialsignuploggroup.Arn
+          Id: trialsignup-2
+      EventBusName: !Ref CustomEventBus
+
+  trialsignupruleER2:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "userexpiry"
+      EventPattern: "{\"source\":[\"trial-sign-up-user-expiry-api\"],\"detail-type\":[\"trial-sign-up-user-expiry-process\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt trialsignupApiDest2.Arn
+          HttpParameters: 
+             HeaderParameters: {}
+             QueryStringParameters: {}
+          RoleArn: !GetAtt IAMtrialApidest.Arn
+          Id: trialsignup-1
+        - Arn: !GetAtt trialsignuploggroup.Arn
+          Id: trialsignup-2
+      EventBusName: !Ref CustomEventBus
+
+  EventParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: eventBusTrialEmailOtpName
+      Type: String
+      Value: !GetAtt CustomEventBus.Arn
+      Description: Arn of eventbus from eventbridge
+
+  EventParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: sendgrid_api_key
+      Type: String
+      Value: !Ref sendgridkey
+      Description: Arn of eventbus from eventbridge
+ 
+  IAMEventScheduler:
+    Type: AWS::IAM::Role
+    DependsOn: EventManagedPolicy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - scheduler.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+      RoleName: !Sub trialsignupschedule-${AWS::Region}
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref EventManagedPolicy
+
+  EventManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ebus-notification-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+            - events:PutEvents
+            Resource:
+            - !GetAtt CustomEventBus.Arn
+            
+  EventScheduler:
+    DependsOn: EventParameter
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: trialsignup-userexpiry
+      Description: "Trial signup userexpiry scheduler"
+      FlexibleTimeWindow: 
+        Mode: "OFF"
+      ScheduleExpression: !Ref userexpirycron
+      ScheduleExpressionTimezone: !Ref userexpirycrontimezone
+      State: ENABLED
+      Target: 
+        EventBridgeParameters: 
+          DetailType: trial-sign-up-user-expiry-process
+          Source: trial-sign-up-user-expiry-api
+        RetryPolicy: 
+          MaximumEventAgeInSeconds: 86400
+          MaximumRetryAttempts: 5
+        Arn: !GetAtt CustomEventBus.Arn
+        RoleArn: !GetAtt IAMEventScheduler.Arn
+
+Outputs:
+  EventBus:
+    Value: !Ref CustomEventBus
+  trialsignuprule1:
+    Description: Arn of trial-sign-up event rule
+    Value: !GetAtt trialsignupruleER1.Arn
+  trialsignuprule2:
+    Description: Arn of trial-sign-up event rule
+    Value: !GetAtt trialsignupruleER2.Arn
+  iamrole:
+    Description: Arn of trail iam role
+    Value: !GetAtt IAMtrialApidest.Arn

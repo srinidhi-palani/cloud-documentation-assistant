@@ -1,0 +1,33 @@
+Template: Story-Feeds.yaml
+Category: EventBridge / API Destinations / CloudWatch
+
+Purpose:
+This template creates an EventBridge infrastructure for story feeds events with a custom event bus, event rule, API destination, and CloudWatch logging.
+
+AWS Services Used:
+- Amazon EventBridge: Custom event bus and rules for story feed events
+- AWS Events Connection: API Key connection for feeds service
+- AWS Events API Destination: HTTP endpoint for feeds API
+- AWS CloudWatch Logs: Log group for EventBridge events
+
+Key Features:
+- Custom EventBridge bus for story feed events
+- Event rule with configurable source and detail type filtering
+- API destination with connection-based authentication
+- CloudWatch log group for event audit trail
+- Configurable log retention
+
+Parameters:
+- EventBusName: Custom EventBridge bus name
+- EventRuleName: EventBridge rule name
+- EventSource: Event source filter for rule
+- EventDetailType: Event detail type filter for rule
+- ApiDestinationName: API destination name
+- ApiEndpoint: Target API endpoint URL
+- LogGroupName: CloudWatch log group name
+
+Use Cases:
+- Story feed event processing and routing
+- Content feed updates and notifications
+- Event-driven feed management
+- Real-time feed synchronization

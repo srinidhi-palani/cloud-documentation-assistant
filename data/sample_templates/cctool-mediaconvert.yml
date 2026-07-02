@@ -1,0 +1,349 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Mediaconvert for cctool/feeds assets conversion. NOTE: Ensure the bucket trigger is added manually for the respective lambda functions if buckets do already exist, else uncomment the Lambda thumbnail trigger config and Lambda trigger config part"
+Parameters:
+  pythonversion:
+    Type: String
+    Default: null
+    Description: 'Python version for the lambda execution'
+  lambdafunction:
+    Type: String
+    Default: null
+    Description: 'Enter the lambda function name'
+  lambdafunctionthumb:
+    Type: String
+    Default: null
+    Description: 'Enter the lambda function name for the thumbnail conversion'
+  srcassetbucket: 
+    Description: Enter the source bucket name 
+    Type: String
+    Default: null
+  destassetbucket:
+    Description: Enter the destination bucket name 
+    Type: String
+    Default: null
+  codezipbucket:
+    Description: Enter the lambda code zip bucket name
+    Type: String
+    Default: null
+  codezippath:
+    Description: Enter the lambda code zip bucket path
+    Type: String
+    Default: null
+  assettype:
+    Description: Enter the type of asset for mediaconvert
+    Type: String
+    Default: null
+    AllowedValues:
+      - cctoolhls
+      - feeds
+    ConstraintDescription: must specify cctool or feeds.
+
+Mappings:
+  Asset:
+    cctoolhls:
+      tempthumbfoldertrigger: 'temp-thumbnail/'
+      uploadbucktrigger: 'video/'
+      finalthumbfolder: 'video/'
+    feeds:
+      tempthumbfoldertrigger: 'temp-thumbnail/'
+      uploadbucktrigger: 'media/video/'
+      finalthumbfolder: 'media/'
+
+Conditions:
+  folder: !Equals [ !Ref assettype, feeds ]
+
+Resources:
+  lambdaLogGroup1:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${lambdafunction}-${assettype}
+      RetentionInDays: 60
+
+  lambdaLogGroup2:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${lambdafunctionthumb}-${assettype}
+      RetentionInDays: 60
+
+  MediaConvertRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub MediaConvert-${assettype}-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: mediaconvert.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref Mediaconvertpolicy
+
+  Mediaconvertpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub MediaConvert-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Action:
+            - s3:Get*
+            - s3:List*
+            Resource: 
+            - !Sub arn:aws:s3:::${srcassetbucket}/*
+          - Effect: Allow
+            Action:
+            - s3:Put*
+            Resource: 
+            - !Sub arn:aws:s3:::${destassetbucket}/*
+          
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${lambdafunction}-${assettype}-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref Lambdaexecutionpolicy
+
+  Lambdaexecutionpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub mediaconvert-${assettype}-lambda-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: 
+            - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${lambdafunction}-${assettype}:*
+          - Effect: Allow
+            Action:
+            - mediaconvert:*
+            - s3:ListAllMyBuckets
+            - s3:ListBucket
+            Resource: 
+            - '*'
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            Resource:
+            - '*'
+            Condition:
+              StringLike:
+                iam:PassedToService:
+                  - mediaconvert.amazonaws.com
+
+  lambdamediaconvert:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub ${lambdafunction}-${assettype}
+      Handler: 'lambda_function.lambda_handler'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: !Sub "Mediaconvert for ${assettype} assets"
+      Code:
+        S3Bucket: !Ref codezipbucket
+        S3Key: !Ref codezippath
+      Runtime: !Ref pythonversion
+      Timeout: 900
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          MediaConvertRole: !GetAtt MediaConvertRole.Arn
+          destbucket: !Ref destassetbucket
+
+#### Lambda trigger config
+#  S3uploadbucketnotification:
+#    Type: AWS::S3::Bucket
+#    DependsOn: lambdamediaconvert
+#    Properties:
+#      BucketName: !Ref srcassetbucket
+#      NotificationConfiguration:
+#        LambdaConfigurations:
+#          - Event: s3:ObjectCreated:*
+#            Filter:
+#              S3Key:
+#                Rules:
+#                  - Name: prefix
+#                    Value: !FindInMap [Asset, !Ref assettype, uploadbucktrigger]
+#            Function: !GetAtt lambdamediaconvert.Arn
+#
+#  lambdainvokepermission:
+#    Type: AWS::Lambda::Permission
+#    DependsOn: lambdamediaconvert
+#    Properties:
+#      FunctionName: !GetAtt lambdamediaconvert.Arn
+#      Action: lambda:InvokeFunction
+#      Principal: s3.amazonaws.com
+#      SourceArn:
+#        Fn::Sub: arn:aws:s3:::${srcassetbucket}
+####
+  LambdaExecutionRolethumb:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${lambdafunctionthumb}-${assettype}-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref LambdaExecutionRolethumbpolicy
+
+  LambdaExecutionRolethumbpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub mediaconvert-${assettype}thumbail-lambda-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: 
+            - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${lambdafunctionthumb}-${assettype}:*
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:ListBucket
+            Resource: 
+            - !Sub arn:aws:s3:::${destassetbucket}
+            - !Sub arn:aws:s3:::${destassetbucket}/temp-thumbnail/*
+            - Fn::Sub: 
+              - |-
+                arn:aws:s3:::${destassetbucket}/${AssetPath}*
+              - AssetPath: !FindInMap [Asset, !Ref assettype, finalthumbfolder]
+
+
+  lambdamediaconvertthumb:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Sub ${lambdafunctionthumb}-${assettype}
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt LambdaExecutionRolethumb.Arn
+      Description: !Sub Mediaconvert for ${assettype} assets thumbnail
+      Code:
+        S3Bucket: !Ref codezipbucket
+        S3Key: !Ref codezippath
+      Runtime: !Ref pythonversion
+      Timeout: 300
+      MemorySize: 128
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile:
+          Fn::Sub:
+          - |-
+              import boto3
+              import os
+              
+              s3 = boto3.client('s3')
+              
+              def lambda_handler(event, context):
+                  bucket_name = event['Records'][0]['s3']['bucket']['name']
+                  key = event['Records'][0]['s3']['object']['key']
+                  print(bucket_name)
+                  print(key)
+                  
+                  try:
+                      # Extract the file name without the extension and file name trim
+                      file_name_without_extension = key.rsplit('.', 1)[0]
+                      print('file_name_without_extension ->'+file_name_without_extension)
+                      file_name_rename = file_name_without_extension.rsplit('.', 1)[0]
+                      print('file_name_rename ->'+file_name_rename)
+                      
+                      # Find the numeric part of the file name
+                      numeric_part = int(file_name_without_extension.split('.')[-1])
+                      
+                      # Increment the numeric part
+                      new_numeric_part = numeric_part + 1
+                      
+                      # Create the new file name
+                      srcthumb = file_name_rename.split('/', 1)[1]
+                      thumbfolder = "${folder}"+srcthumb
+                      print('thumbfolder ->'+thumbfolder)
+                      new_file_name = f"{thumbfolder}_{new_numeric_part:05d}.png"
+                      print('new_file_name ->'+new_file_name)
+                      
+                      # Copy the file to the new name
+                      s3.copy_object(
+                          Bucket=bucket_name,
+                          CopySource=f'{bucket_name}/{key}',
+                          Key=new_file_name
+                      )
+                  
+                      return {
+                          'statusCode': 200,
+                          'body': f'File renamed from {key} to {new_file_name}'
+                      }
+                  except Exception as e:
+                      print ('Exception: %s' % e)
+                      statusCode = 500
+                      raise
+          - folder: !FindInMap [Asset, !Ref assettype, finalthumbfolder]
+
+#### Lambda thumbnail trigger config
+#  S3targetbucketnotification:
+#    Type: AWS::S3::Bucket
+#    DependsOn: lambdamediaconvert
+#    Properties:
+#      BucketName: !Ref srcassetbucket
+#      NotificationConfiguration:
+#        LambdaConfigurations:
+#          - Event: s3:ObjectCreated:*
+#            Filter:
+#              S3Key:
+#                Rules:
+#                  - Name: prefix
+#                    Value: !FindInMap [Asset, !Ref assettype, tempthumbfoldertrigger]
+#            Function: !GetAtt lambdamediaconvertthumb.Arn
+
+#  lambdatargetinvokepermission:
+#    Type: AWS::Lambda::Permission
+#    DependsOn: lambdamediaconvertthumb
+#    Properties:
+#      FunctionName: !GetAtt lambdamediaconvertthumb.Arn
+#      Action: lambda:InvokeFunction
+#      Principal: s3.amazonaws.com
+#      SourceArn:
+#        Fn::Sub: arn:aws:s3:::${destassetbucket}
+####
+Outputs:
+  lambdaIAMrole:
+    Description: lambda IAM role for mediaconvert
+    Value: !GetAtt LambdaExecutionRole.Arn
+  lambdathumbIAMrole:
+    Description: lambda thumbnail IAM role for mediaconvert
+    Value: !GetAtt LambdaExecutionRolethumb.Arn
+  mediaconvertIAMrole:
+    Description: Mediaconvert IAM role
+    Value: !GetAtt MediaConvertRole.Arn

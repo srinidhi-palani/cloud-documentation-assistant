@@ -1,0 +1,563 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'This template uploads assets to s3 via api gateway and lambda for company logo upload via pre signed url. Thereby serves the logo via cdn'
+Parameters:
+  lambdaRuntime:
+    Description: Enter the lambda runtime
+    Default: null
+    Type: String
+
+  s3uploadlambda:
+    Description: Enter the s3 upload lambda name
+    Default: null
+    Type: String
+
+  s3upload:
+    Description: Enter the api name for s3 upload
+    Default: null
+    Type: String
+
+  uploadbucket:
+    Description: Enter the s3 destination upload bucket name
+    Default: null
+    Type: String
+
+  loggroupretention:
+    Description: Enter the log gorup retention days
+    Default: null
+    Type: Number
+  
+  parentpart:
+    Description: Enter the parent path
+    Default: null
+    Type: String
+
+  subpath:
+    Description: Enter the sub path
+    Default: null
+    Type: String
+
+  gatewaystage:
+    Description: Enter the gateway stage
+    Default: null
+    Type: String
+  
+  RegionalCertificateArn:
+    Description: Enter the regional certificate arn
+    Default: null
+    Type: String
+
+  CDNCertificateArn:
+    Description: Certificate ARN for CDN
+    Type: String
+    Default: null
+
+  uploads3domainurl:
+    Description: Enter the domain name for the api gateway
+    Default: null
+    Type: String
+  
+  lambdagithubrepo:
+    Description: Enter the lambda github repo
+    Default: null
+    Type: String
+
+  s3uploadlambdafolder:
+    Description: Enter the folder name available in lambda repo
+    Default: null
+    Type: String
+
+  s3uploadlambdabranch:
+    Description: Enter the branch name from the code to be used in codebuild
+    Default: null
+    Type: String
+
+  AllowedOrigin:
+    Type: CommaDelimitedList
+    Description: List of allowed origins for CORS (comma-separated)
+    Default: null
+  
+  comapanyassetwebsiteurl:
+    Description: Enter the bucket url 
+    Type: String
+    Default: null
+  
+  CDNCachePolicy:
+    Description: Enter the cdn cache policy Id
+    Type: String
+    Default: null
+
+  CDNHostedZoneId:
+    Description: Enter the cloudfront hosted zone id
+    Type: String
+    Default: null
+  
+  HostedZoneName:
+    Description: Please enter the domain name.
+    Type: String
+    Default: null
+  
+  urlexpirytime:
+    Description: Enter the presigned url expiration time in seconds
+    Type: Number
+    Default: null
+Resources:
+  CompanyAssetBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref uploadbucket
+      PublicAccessBlockConfiguration: 
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: Retainobjectversion
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NewerNoncurrentVersions: 5
+              NoncurrentDays: 60
+            ObjectSizeGreaterThan: 1 #bytes
+          - Id: Expiredeletemarker
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - PUT 
+            AllowedOrigins: !Ref "AllowedOrigin"
+            MaxAge: 3000
+      
+  AssetBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: CompanyAssetBucket
+    Properties:
+      Bucket: !Ref uploadbucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${uploadbucket}'
+              - !Sub 'arn:aws:s3:::${uploadbucket}/*'
+            Principal: 
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+
+  companyassetcdn:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - CompanyAssetBucket
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref comapanyassetwebsiteurl
+        Origins:
+          - DomainName: !GetAtt CompanyAssetBucket.DomainName
+            Id: !Ref CompanyAssetBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn
+          MinimumProtocolVersion: TLSv1.2_2021
+        Enabled: true
+        DefaultCacheBehavior:
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref CompanyAssetBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  lambdaLogGroup1:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${s3uploadlambda}
+      RetentionInDays: !Ref loggroupretention
+
+  lambdaloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${s3uploadlambda}
+      RetentionInDays: !Ref loggroupretention
+
+  lambdaManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DependsOn: CompanyAssetBucket
+    Properties:
+      ManagedPolicyName: !Sub lambda-companylogo-upload-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: 
+            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${s3uploadlambda}:*"
+          - Effect: Allow
+            Action:
+            - s3:PutObject
+            Resource:
+            - !Sub "arn:aws:s3:::${uploadbucket}/*"
+          - Effect: Allow
+            Action:
+            - codebuild:CreateReportGroup
+            - codebuild:CreateReport
+            - codebuild:UpdateReport
+            - codebuild:BatchPutTestCases
+            - codebuild:BatchPutCodeCoverages
+            Resource:
+            - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/${s3uploadlambda}-codebuild"
+          - Effect: Allow
+            Action:
+            - lambda:UpdateFunctionCode
+            Resource:
+            - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${s3uploadlambda}"
+
+  lambdarole:
+    Type: AWS::IAM::Role
+    DependsOn: lambdaManagedPolicy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+                - "codebuild.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      RoleName: !Sub s3uploadlambda-${AWS::Region}
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref lambdaManagedPolicy
+
+  remindercodebuild:
+    Type: 'AWS::CodeBuild::Project'
+    DependsOn: lambdarole
+    Properties:
+      Name: !Sub '${s3uploadlambda}-codebuild'
+      ServiceRole: !GetAtt 'lambdarole.Arn'
+      Artifacts:
+        Type: no_artifacts
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: CODEBUILD
+        PrivilegedMode: true
+        Image: aws/codebuild/standard:7.0
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref lambdaloggroup
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:
+        Auth:
+          Type: OAUTH
+        Location: !Ref lambdagithubrepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              s3uploadlambda: ${s3uploadlambda}
+              s3uploadlambdabranch: ${s3uploadlambdabranch}
+              s3uploadlambdafolder: ${s3uploadlambdafolder}
+          phases:
+            install:
+              commands:
+                - echo Installing dependencies...
+            pre_build:
+              commands:
+                - echo Checking out ${s3uploadlambdabranch} branch...
+                - git checkout ${s3uploadlambdabranch}
+            build:
+              commands:
+                - echo Zipping the Lambda function code...
+                - zip -j index.zip AWS-Lambda/${s3uploadlambdafolder}/index.py
+            post_build:
+              commands:
+                - echo Deploying Lambda function...
+                - aws lambda update-function-code --function-name ${s3uploadlambda} --zip-file fileb://index.zip
+          artifacts:
+            files:
+              - index.zip
+
+  lambdauploadbucket:
+    Type: AWS::Lambda::Function
+    DependsOn: [ "CompanyAssetBucket", "lambdarole" ]
+    Properties:
+      FunctionName: !Ref s3uploadlambda
+      Description: Lambda function that upload's company logo to s3
+      Runtime: !Ref lambdaRuntime
+      Handler: 'index.lambda_handler'
+      Timeout: 900
+      Role: !GetAtt lambdarole.Arn
+      Environment:
+        Variables:
+          LOGO_BUCKET_NAME: !Ref uploadbucket
+          Expirytime: !Ref urlexpirytime
+      Code:
+        ZipFile: |
+            import json
+            import boto3
+            import os
+            from botocore.exceptions import ClientError
+            
+            s3_client = boto3.client("s3")
+            BUCKET_NAME = os.environ.get("LOGO_BUCKET_NAME")
+            URL_EXPIRY = os.environ.get("Expirytime")
+            
+            def lambda_handler(event, context):
+                try:
+                    print("Incoming event:", json.dumps(event))  # Debug log
+            
+                    # Extract file info
+                    body = event.get("body-json", {}).get("file")
+                    if not body:
+                        return {
+                            "statusCode": 400,
+                            "body": json.dumps({"error": "Missing 'file' in request body"})
+                        }
+            
+                    file_name = body.get("fieldname")
+                    folder = body.get("folder")
+                    file_type = body.get("mimetype")
+            
+                    # Extract companyid from headers
+                    headers = event.get("params", {}).get("header", {})
+                    company_id = headers.get("companyid")
+            
+                    if not BUCKET_NAME:
+                        return {
+                            "statusCode": 500,
+                            "body": json.dumps({"error": "UPLOAD_BUCKET env variable not set"})
+                        }
+                    if not file_name or not folder or not file_type or not company_id:
+                        return {
+                            "statusCode": 400,
+                            "body": json.dumps({"error": "file must include 'fieldname', 'folder', 'mimetype' and header must include 'companyid'"})
+                        }
+            
+                    # Construct S3 path
+                    path = f"{folder}/{company_id}/{file_name}"
+            
+                    # Generate presigned URL
+                    presigned_url = s3_client.generate_presigned_url(
+                        "put_object",
+                        Params={
+                            "Bucket": BUCKET_NAME,
+                            "Key": path,
+                            "ContentType": file_type
+                        },
+                        ExpiresIn=URL_EXPIRY
+                    )
+            
+                    return {
+                        "statusCode": 200,
+                        "headers": {
+                            "Content-Type": "application/json",
+                            "Access-Control-Allow-Origin": "*",
+                            "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,companyid",
+                            "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT"
+                        },
+                        "body": json.dumps({
+                            "companyId": company_id,
+                            "presigned_url": presigned_url,
+                            "fileUrl": f"https://{BUCKET_NAME}.s3.amazonaws.com/{path}"
+                        })
+                    }
+            
+                except ClientError as e:
+                    return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+
+  # REST API
+  S3UploadApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Ref s3upload
+      Description: Upload to S3 API Gateway (REST)
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # /v1 resource
+  ApiV1Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref S3UploadApi
+      ParentId: !GetAtt S3UploadApi.RootResourceId
+      PathPart: !Ref parentpart
+
+  # /v1/upload-s3 resource
+  ApiUploadS3Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref S3UploadApi
+      ParentId: !Ref ApiV1Resource
+      PathPart: !Ref subpath
+
+  # POST /v1/upload-s3 method
+  ApiUploadS3Method:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref S3UploadApi
+      ResourceId: !Ref ApiUploadS3Resource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: 
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdauploadbucket.Arn}/invocations
+        RequestTemplates:
+          application/json: |
+              ##  See https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-mapping-template-reference.html
+              ##  This template will pass through all parameters including path, querystring, header, stage variables, and context through to the integration endpoint via the body/payload
+              #set($allParams = $input.params())
+              {
+              "body-json" : $input.json('$'),
+              "params" : {
+              #foreach($type in $allParams.keySet())
+                  #set($params = $allParams.get($type))
+              "$type" : {
+                  #foreach($paramName in $params.keySet())
+                  "$paramName" : "$util.escapeJavaScript($params.get($paramName))"
+                      #if($foreach.hasNext),#end
+                  #end
+              }
+                  #if($foreach.hasNext),#end
+              #end
+              },
+              "stage-variables" : {
+              #foreach($key in $stageVariables.keySet())
+              "$key" : "$util.escapeJavaScript($stageVariables.get($key))"
+                  #if($foreach.hasNext),#end
+              #end
+              },
+              "context" : {
+                  "account-id" : "$context.identity.accountId",
+                  "api-id" : "$context.apiId",
+                  "api-key" : "$context.identity.apiKey",
+                  "authorizer-principal-id" : "$context.authorizer.principalId",
+                  "caller" : "$context.identity.caller",
+                  "cognito-authentication-provider" : "$context.identity.cognitoAuthenticationProvider",
+                  "cognito-authentication-type" : "$context.identity.cognitoAuthenticationType",
+                  "cognito-identity-id" : "$context.identity.cognitoIdentityId",
+                  "cognito-identity-pool-id" : "$context.identity.cognitoIdentityPoolId",
+                  "http-method" : "$context.httpMethod",
+                  "stage" : "$context.stage",
+                  "source-ip" : "$context.identity.sourceIp",
+                  "user" : "$context.identity.user",
+                  "user-agent" : "$context.identity.userAgent",
+                  "user-arn" : "$context.identity.userArn",
+                  "request-id" : "$context.requestId",
+                  "resource-id" : "$context.resourceId",
+                  "resource-path" : "$context.resourcePath"
+                  }
+              }
+        PassthroughBehavior: WHEN_NO_MATCH
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                $input.body
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+
+  # Deployment
+  S3UploadApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref S3UploadApi
+    DependsOn: ApiUploadS3Method
+
+  # Stage
+  S3UploadApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: !Ref gatewaystage
+      DeploymentId: !Ref S3UploadApiDeployment
+      RestApiId: !Ref S3UploadApi
+
+  # Lambda Permission
+  MyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref lambdauploadbucket
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${S3UploadApi}/*/POST/v1/upload-s3
+
+  # Optional: Custom Domain for REST API
+  ApiGatewayCustomDomain:
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      DomainName: !Ref uploads3domainurl 
+      RegionalCertificateArn: !Ref RegionalCertificateArn
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      SecurityPolicy: TLS_1_2
+
+  # Optional: BasePathMapping to bind domain to API stage
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    DependsOn: S3UploadApiStage
+    Properties:
+      DomainName: !Ref ApiGatewayCustomDomain
+      RestApiId: !Ref S3UploadApi
+      Stage: !Ref gatewaystage
+
+  DNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    DependsOn: [ApiGatewayCustomDomain, companyassetcdn]
+    Properties:
+      HostedZoneName: !Ref HostedZoneName
+      RecordSets:
+      - Name: !Ref uploads3domainurl
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ApiGatewayCustomDomain.RegionalHostedZoneId
+          DNSName: !GetAtt ApiGatewayCustomDomain.RegionalDomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref comapanyassetwebsiteurl 
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt companyassetcdn.DomainName
+          EvaluateTargetHealth: false
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway Endpoint URL
+    Value: !Sub "https://${S3UploadApi}.execute-api.${AWS::Region}.amazonaws.com/"

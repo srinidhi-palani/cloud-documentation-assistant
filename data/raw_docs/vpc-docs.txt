@@ -1,0 +1,42 @@
+Template: vpc.yml
+Category: Networking / VPC
+
+Purpose:
+This template creates a complete VPC networking infrastructure with 3 public and 6 private subnets spread across the first 3 Availability Zones in a region, with optional NAT Gateway support.
+
+AWS Services Used:
+- Amazon VPC: Virtual Private Cloud with DNS support
+- Amazon EC2 Subnets: 3 public + 6 private subnets (ECS + RDS)
+- Internet Gateway: For public subnet internet access
+- NAT Gateway: Optional, for private subnet outbound internet
+- Route Tables: Separate tables for public, private ECS, and private RDS subnets
+- Elastic IP: For NAT Gateway
+
+Key Features:
+- Multi-AZ deployment across 3 availability zones
+- Separate private subnets for ECS and RDS workloads
+- Optional NAT Gateway (controlled by parameter)
+- Environment-based naming (dev/qa/uat/prod)
+- DNS hostnames and DNS support enabled
+- Conditional NAT Gateway using CloudFormation Conditions
+
+Parameters:
+- EnvironmentName: Environment prefix (dev/qayoufactors/qaaccutrain/uatyoufactors/uataccutrain/prodyoufactors/prodaccutrain)
+- VPCCidrblock: VPC CIDR block
+- PublicSubnetCIDR: Comma-delimited list of 3 public subnet CIDRs
+- PrivateSubnetCIDR: Comma-delimited list of 6 private subnet CIDRs
+- natgatewayneed: Whether to create NAT Gateway (yes/no)
+
+Subnet Layout:
+- Public Subnet 1, 2, 3: Across AZ1, AZ2, AZ3
+- Private ECS Subnet 1, 2, 3: For ECS workloads
+- Private RDS Subnet 1, 2, 3: For RDS database instances
+
+Outputs:
+- VPCID: VPC ID for reference by other stacks
+
+Use Cases:
+- Foundation networking for all other infrastructure
+- Isolate ECS and RDS in private subnets
+- Enable secure outbound internet from private subnets via NAT
+- Multi-environment deployment (dev/qa/uat/prod)

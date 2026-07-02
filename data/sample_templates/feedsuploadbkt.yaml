@@ -1,0 +1,243 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Feedshls and feedsupload buckets with cloudfront distribution and OAI for secure access"
+Parameters: 
+  EnvironmentValue: 
+      AllowedValues:
+        - "Dev"
+        - "QA"
+        - "UAT"
+        - "Prod"
+      Default: null
+      Description: "Which environment is this?"
+      Type: String  
+
+  AllowedOrigins:
+    Description: "S3 Bucket access allowed this origin only"
+    Type: String
+    Default: null
+
+  S3Deletionpolicy:
+    Description: "To retain or delete the s3 bucket"
+    Type: String
+    Default: null
+    AllowedValues: ["Retain", "Delete"]
+
+Mappings: 
+  Environments:
+    Dev:  
+      BucketNamefeedhls: 'feedshlsassetsbucket-dev1'
+      BucketNamefeedupload: 'feedsuploadassetsbucket-dev1'
+    QA:  
+      BucketNamefeedhls: 'feedshlsassetsbucket-qa'
+      BucketNamefeedupload: 'feedsuploadassetsbucket-qa'
+    UAT:  
+      BucketNamefeedhls: 'feedshlsassetsbucket-uat-vapt'
+      BucketNamefeedupload: 'feedsuploadassetsbucket-uat-vapt'
+    Prod:  
+      BucketNamefeedhls: 'feedshlsassetsbucket-prod'
+      BucketNamefeedupload: 'feedsuploadassetsbucket-prod'
+Resources:
+  OAIfeedshls:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Join ["", ["access-identity-", !FindInMap [Environments, !Ref EnvironmentValue, BucketNamefeedhls],".s3.amazonaws.com"]]
+
+  OAIfeedsupload:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Join ["", ["access-identity-", !FindInMap [Environments, !Ref EnvironmentValue, BucketNamefeedupload],".s3.amazonaws.com"]]
+
+  S3Bucketfeedshls:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: !Ref S3Deletionpolicy
+    Properties:
+      BucketName: !FindInMap [Environments, !Ref EnvironmentValue, BucketNamefeedhls]
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256 
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+            AllowedOrigins: 
+              - !Ref AllowedOrigins
+            MaxAge: 3000
+            ExposedHeaders: 
+              - "ETag"
+
+  S3Bucketfeedsupload:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: !Ref S3Deletionpolicy
+    Properties:
+      BucketName: !FindInMap [Environments, !Ref EnvironmentValue, BucketNamefeedupload]
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256 
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - PUT 
+              - HEAD
+              - POST
+            AllowedOrigins:
+              - !Ref AllowedOrigins
+            MaxAge: 3000
+            ExposedHeaders: 
+              - "ETag"
+
+  S3BucketPolicyfeedshls:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref S3Bucketfeedshls
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: 1
+            Effect: Allow
+            Action: "s3:*"
+            Principal:
+              CanonicalUser: !GetAtt OAIfeedshls.S3CanonicalUserId
+            Resource:  !Join ["",["arn:aws:s3:::", !Ref S3Bucketfeedshls,"/*"]]
+            Condition:
+              StringEquals:
+                "s3:x-amz-acl": "bucket-owner-full-control"
+          - Sid: 2
+            Effect: Allow
+            Action: "s3:GetObject"
+            Resource: !Join ["",["arn:aws:s3:::", !Ref S3Bucketfeedshls,"/*"]]
+            Principal:
+              CanonicalUser: !GetAtt OAIfeedshls.S3CanonicalUserId
+
+  S3BucketPolicyfeedsupload:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref S3Bucketfeedsupload
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: 1
+            Effect: Allow
+            Action: "s3:PutObject"
+            Principal:
+              CanonicalUser: !GetAtt OAIfeedsupload.S3CanonicalUserId
+            Resource:  !Join ["",["arn:aws:s3:::", !Ref S3Bucketfeedsupload,"/*"]]
+            Condition:
+              StringEquals:
+                "s3:x-amz-acl": "bucket-owner-full-control"
+          - Sid: 2
+            Effect: Allow
+            Action: "s3:GetObject"
+            Resource: !Join ["",["arn:aws:s3:::", !Ref S3Bucketfeedsupload,"/*"]]
+            Principal:
+              CanonicalUser: !GetAtt OAIfeedsupload.S3CanonicalUserId
+
+  CloudFrontDistributionfeedshls:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:        
+        Origins:
+          - DomainName: !GetAtt S3Bucketfeedshls.DomainName
+            Id: !Ref S3Bucketfeedshls
+            S3OriginConfig:
+              OriginAccessIdentity: !Join ["", ["origin-access-identity/cloudfront/", !Ref OAIfeedshls]] 
+            ConnectionAttempts: 3
+            ConnectionTimeout: 10
+        Enabled: true
+        DefaultCacheBehavior:     
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+          MinTTL: 0
+          MaxTTL: 31536000
+          DefaultTTL: 300
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref S3Bucketfeedshls
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  CloudFrontDistributionfeedsupload:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:        
+        Origins:
+          - DomainName: !GetAtt S3Bucketfeedsupload.DomainName
+            Id: !Ref S3Bucketfeedsupload
+            S3OriginConfig:
+              OriginAccessIdentity: !Join ["", ["origin-access-identity/cloudfront/", !Ref OAIfeedsupload]] 
+            ConnectionAttempts: 3
+            ConnectionTimeout: 10
+        Enabled: true
+        DefaultCacheBehavior:     
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+          MinTTL: 0
+          MaxTTL: 31536000
+          DefaultTTL: 300
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref S3Bucketfeedsupload
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+Outputs: 
+  BucketNamefeedshls:
+    Description: 'S3 feeds hls bucket name'
+    Value: !Ref S3Bucketfeedshls 
+  DistributionIdfeedshls: 
+    Description : "CloudFront Distribution Id"
+    Value : !Ref CloudFrontDistributionfeedshls 
+  CloudFrontDomainNamefeedshls:
+    Description : "URL to access the CloudFront distribution"
+    Value : !GetAtt CloudFrontDistributionfeedshls.DomainName  
+  CloudFrontAccessIdentityfeedshls:
+    Description : "CloundFronAccessIdentity Id"
+    Value : !Ref OAIfeedshls 
+
+  BucketNamefeedsupload:
+    Description: 'S3 feeds upload bucket name'
+    Value: !Ref S3Bucketfeedsupload 
+  DistributionIdfeedsupload: 
+    Description : "CloudFront Distribution Id"
+    Value : !Ref CloudFrontDistributionfeedsupload 
+  CloudFrontDomainNamefeedsupload:
+    Description : "URL to access the CloudFront distribution"
+    Value : !GetAtt CloudFrontDistributionfeedsupload.DomainName  
+  CloudFrontAccessIdentityfeedsupload:
+    Description : "CloundFronAccessIdentity Id"
+    Value : !Ref OAIfeedsupload

@@ -1,0 +1,29 @@
+Template: application-react.yaml
+Category: React / S3 / CloudFront / CodeBuild / Route53
+
+Purpose:
+This is a large comprehensive template for deploying React web applications with S3 static hosting, CloudFront CDN, CodeBuild CI/CD, and Route53 DNS. It supports multiple React applications in a single template deployment.
+
+AWS Services Used:
+- Amazon S3: Static website hosting for React builds
+- Amazon CloudFront: CDN for global React app delivery
+- AWS CodeBuild: CI/CD pipeline for building and deploying React apps
+- Amazon Route53: DNS records for custom domains
+- AWS Certificate Manager: SSL/TLS certificates
+- AWS IAM: CodeBuild execution roles and policies
+- AWS CloudWatch Logs: Build and deployment logging
+
+Key Features:
+- Multi-environment support (Dev/QA/UAT/Prod)
+- Automated React build and deploy via CodeBuild
+- CloudFront distribution with custom domain
+- Route53 DNS management
+- HTTPS enforcement via ACM certificates
+- Environment-specific configuration via CloudFormation mappings
+
+Use Cases:
+- Deploy React single-page applications to AWS
+- Automated CI/CD for frontend applications
+- Multi-environment frontend deployment
+- Serve React apps via CloudFront CDN globally
+- Custom domain setup with HTTPS

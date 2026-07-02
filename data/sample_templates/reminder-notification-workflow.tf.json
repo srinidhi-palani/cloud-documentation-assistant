@@ -1,0 +1,194 @@
+{
+  "terraform": {
+    "required_providers": {
+      "aws": {
+        "source": "hashicorp/aws",
+        "version": "~> 5.0"
+      }
+    }
+  },
+  "provider": {
+    "aws": {
+      "region": "eu-north-1"
+    }
+  },
+  "variable": {
+    "stack_name": {
+      "description": "Required. Prefix applied to all resource names, similar to CloudFormation's AWS::StackName.",
+      "type": "string",
+      "default": "reminder-notification-workflow"
+    },
+    "api_endpoint": {
+      "description": "Required. The HTTPS endpoint the API Destination will invoke.",
+      "type": "string"
+    },
+    "api_key_name": {
+      "description": "Required. Header name used to authenticate against the destination API.",
+      "type": "string",
+      "default": "x-api-key"
+    },
+    "api_key_value": {
+      "description": "Required. Secret value of the API key used to authenticate against the destination API.",
+      "type": "string",
+      "sensitive": true
+    },
+    "schedule_expression": {
+      "description": "Required. EventBridge Scheduler cron/rate expression.",
+      "type": "string",
+      "default": "rate(1 day)"
+    }
+  },
+  "resource": {
+    "aws_sqs_queue": {
+      "reminder_dlq": {
+        "name": "${var.stack_name}-dlq",
+        "message_retention_seconds": 1209600,
+        "tags": {
+          "Purpose": "Dead letter queue for reminder notification source queue"
+        }
+      },
+      "reminder_queue": {
+        "name": "${var.stack_name}-queue",
+        "visibility_timeout_seconds": 60,
+        "redrive_policy": "${jsonencode({deadLetterTargetArn = aws_sqs_queue.reminder_dlq.arn, maxReceiveCount = 3})}",
+        "tags": {
+          "Purpose": "Source queue for reminder notification pipe"
+        }
+      }
+    },
+    "aws_cloudwatch_event_connection": {
+      "reminder_connection": {
+        "name": "${var.stack_name}-connection",
+        "authorization_type": "API_KEY",
+        "auth_parameters": {
+          "api_key": {
+            "key": "${var.api_key_name}",
+            "value": "${var.api_key_value}"
+          }
+        }
+      }
+    },
+    "aws_cloudwatch_event_api_destination": {
+      "reminder_destination": {
+        "name": "${var.stack_name}-destination",
+        "connection_arn": "${aws_cloudwatch_event_connection.reminder_connection.arn}",
+        "invocation_endpoint": "${var.api_endpoint}",
+        "http_method": "POST",
+        "invocation_rate_limit_per_second": 10
+      }
+    },
+    "aws_iam_role": {
+      "lambda_role": {
+        "name": "${var.stack_name}-lambda-role",
+        "assume_role_policy": "${jsonencode({Version=\"2012-10-17\",Statement=[{Action=\"sts:AssumeRole\",Principal={Service=\"lambda.amazonaws.com\"},Effect=\"Allow\"}]})}"
+      },
+      "pipe_role": {
+        "name": "${var.stack_name}-pipe-role",
+        "assume_role_policy": "${jsonencode({Version=\"2012-10-17\",Statement=[{Action=\"sts:AssumeRole\",Principal={Service=\"pipes.amazonaws.com\"},Effect=\"Allow\"}]})}"
+      },
+      "scheduler_role": {
+        "name": "${var.stack_name}-scheduler-role",
+        "assume_role_policy": "${jsonencode({Version=\"2012-10-17\",Statement=[{Action=\"sts:AssumeRole\",Principal={Service=\"scheduler.amazonaws.com\"},Effect=\"Allow\"}]})}"
+      }
+    },
+    "aws_iam_policy": {
+      "lambda_policy": {
+        "name": "${var.stack_name}-lambda-policy",
+        "policy": "${jsonencode({Version=\"2012-10-17\",Statement=[{Action=[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],Effect=\"Allow\",Resource=\"arn:aws:logs:*:*:*\"},{Action=[\"sqs:SendMessage\"],Effect=\"Allow\",Resource=aws_sqs_queue.reminder_queue.arn}]})}"
+      },
+      "pipe_policy": {
+        "name": "${var.stack_name}-pipe-policy",
+        "policy": "${jsonencode({Version=\"2012-10-17\",Statement=[{Action=[\"sqs:ReceiveMessage\",\"sqs:DeleteMessage\",\"sqs:GetQueueAttributes\"],Effect=\"Allow\",Resource=aws_sqs_queue.reminder_queue.arn},{Action=[\"events:InvokeApiDestination\"],Effect=\"Allow\",Resource=aws_cloudwatch_event_api_destination.reminder_destination.arn},{Action=[\"secretsmanager:GetSecretValue\",\"secretsmanager:DescribeSecret\"],Effect=\"Allow\",Resource=\"arn:aws:secretsmanager:*:*:secret:events!connection/*\"}]})}"
+      },
+      "scheduler_policy": {
+        "name": "${var.stack_name}-scheduler-policy",
+        "policy": "${jsonencode({Version=\"2012-10-17\",Statement=[{Action=[\"lambda:InvokeFunction\"],Effect=\"Allow\",Resource=aws_lambda_function.reminder_lambda.arn}]})}"
+      }
+    },
+    "aws_iam_role_policy_attachment": {
+      "lambda_attach": {
+        "role": "${aws_iam_role.lambda_role.name}",
+        "policy_arn": "${aws_iam_policy.lambda_policy.arn}"
+      },
+      "pipe_attach": {
+        "role": "${aws_iam_role.pipe_role.name}",
+        "policy_arn": "${aws_iam_policy.pipe_policy.arn}"
+      },
+      "scheduler_attach": {
+        "role": "${aws_iam_role.scheduler_role.name}",
+        "policy_arn": "${aws_iam_policy.scheduler_policy.arn}"
+      }
+    },
+    "aws_lambda_function": {
+      "reminder_lambda": {
+        "function_name": "${var.stack_name}-lambda",
+        "runtime": "python3.12",
+        "handler": "index.handler",
+        "role": "${aws_iam_role.lambda_role.arn}",
+        "timeout": 30,
+        "filename": "lambda_function_payload.zip",
+        "source_code_hash": "${filebase64sha256(\"lambda_function_payload.zip\")}",
+        "environment": {
+          "variables": {
+            "QUEUE_URL": "${aws_sqs_queue.reminder_queue.url}"
+          }
+        }
+      }
+    },
+    "aws_pipes_pipe": {
+      "reminder_pipe": {
+        "name": "${var.stack_name}-pipe",
+        "role_arn": "${aws_iam_role.pipe_role.arn}",
+        "source": "${aws_sqs_queue.reminder_queue.arn}",
+        "target": "${aws_cloudwatch_event_api_destination.reminder_destination.arn}",
+        "source_parameters": {
+          "sqs_queue_parameters": {
+            "batch_size": 1
+          }
+        },
+        "target_parameters": {
+          "http_parameters": {}
+        }
+      }
+    },
+    "aws_scheduler_schedule": {
+      "reminder_schedule": {
+        "name": "${var.stack_name}-schedule",
+        "flexible_time_window": {
+          "mode": "OFF"
+        },
+        "schedule_expression": "${var.schedule_expression}",
+        "target": {
+          "arn": "${aws_lambda_function.reminder_lambda.arn}",
+          "role_arn": "${aws_iam_role.scheduler_role.arn}"
+        }
+      }
+    }
+  },
+  "output": {
+    "reminder_queue_arn": {
+      "value": "${aws_sqs_queue.reminder_queue.arn}",
+      "description": "ARN of the reminder source SQS queue"
+    },
+    "reminder_dlq_arn": {
+      "value": "${aws_sqs_queue.reminder_dlq.arn}",
+      "description": "ARN of the dead-letter SQS queue"
+    },
+    "api_destination_arn": {
+      "value": "${aws_cloudwatch_event_api_destination.reminder_destination.arn}",
+      "description": "ARN of the EventBridge API Destination"
+    },
+    "pipe_arn": {
+      "value": "${aws_pipes_pipe.reminder_pipe.arn}",
+      "description": "ARN of the EventBridge Pipe"
+    },
+    "schedule_arn": {
+      "value": "${aws_scheduler_schedule.reminder_schedule.arn}",
+      "description": "ARN of the EventBridge Scheduler schedule"
+    },
+    "lambda_arn": {
+      "value": "${aws_lambda_function.reminder_lambda.arn}",
+      "description": "ARN of the reminder Lambda function"
+    }
+  }
+}

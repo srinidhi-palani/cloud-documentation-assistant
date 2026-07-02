@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation template that creates an SNS topic with two SQS subscriber queues,
+  each with a dead letter queue, IAM managed policy, and SSM parameters.
+
+Parameters:
+
+  MessageRetentionPeriod:
+    Type: Number
+    Default: 1209600
+    Description: SQS message retention period in seconds (14 days)
+
+  QueueVisibilityTimeout:
+    Type: Number
+    Default: 300
+    Description: SQS visibility timeout in seconds
+
+  MaxReceiveCount:
+    Type: Number
+    Default: 3
+    Description: Maximum receive count before message moves to DLQ
+
+Resources:
+
+  # ----------------------------------------------------------
+  # SNS TOPIC
+  # ----------------------------------------------------------
+  SnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Main SNS Topic
+
+  # ----------------------------------------------------------
+  # DEAD LETTER QUEUES
+  # ----------------------------------------------------------
+  DLQ1:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+
+  DLQ2:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+
+  # ----------------------------------------------------------
+  # SQS SUBSCRIBER QUEUES
+  # ----------------------------------------------------------
+  SubscriberQueue1:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQ1.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  SubscriberQueue2:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQ2.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+
+  # ----------------------------------------------------------
+  # SQS QUEUE POLICY — allow SNS to send messages
+  # ----------------------------------------------------------
+  SubscriberQueue1Policy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SubscriberQueue1
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt SubscriberQueue1.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref SnsTopic
+
+  SubscriberQueue2Policy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SubscriberQueue2
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt SubscriberQueue2.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref SnsTopic
+
+  # ----------------------------------------------------------
+  # SNS SUBSCRIPTIONS
+  # ----------------------------------------------------------
+  SnsSubscription1:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SnsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt SubscriberQueue1.Arn
+
+  SnsSubscription2:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SnsTopic
+      Protocol: sqs
+      Endpoint: !GetAtt SubscriberQueue2.Arn
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS
+  # ----------------------------------------------------------
+  SnsTopicArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sns/topic/arn"
+      Type: String
+      Value: !Ref SnsTopic
+      Description: SNS Topic ARN
+
+  Queue1UrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/subscriber-queue-1/url"
+      Type: String
+      Value: !Ref SubscriberQueue1
+      Description: URL of SQS Subscriber Queue 1
+
+  Queue2UrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/subscriber-queue-2/url"
+      Type: String
+      Value: !Ref SubscriberQueue2
+      Description: URL of SQS Subscriber Queue 2
+
+Outputs:
+
+  SnsTopicArn:
+    Description: SNS Topic ARN
+    Value: !Ref SnsTopic
+
+  SubscriberQueue1Url:
+    Description: URL of Subscriber Queue 1
+    Value: !Ref SubscriberQueue1
+
+  SubscriberQueue2Url:
+    Description: URL of Subscriber Queue 2
+    Value: !Ref SubscriberQueue2

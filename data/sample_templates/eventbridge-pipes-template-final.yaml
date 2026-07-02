@@ -1,0 +1,568 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Creates two EventBridge Pipes each with a dedicated SQS source queue (with DLQ),
+  an EventBridge API Destination target, supporting Connections, IAM role/policy,
+  and a Lambda function that sends messages to both SQS queues.
+
+Parameters:
+
+  ApiKey1Value:
+    Type: String
+    Default: "placeholder-api-key-1"
+    Description: API Key for the first EventBridge Connection (update before production use)
+
+  ApiKey2Value:
+    Type: String
+    Default: "placeholder-api-key-2"
+    Description: API Key for the second EventBridge Connection (update before production use)
+
+  ApiKeyHeaderName:
+    Type: String
+    Default: "x-api-key"
+    Description: Header name used for API Key authorization
+
+  SourceQueue1Name:
+    Type: String
+    Default: "source-queue-1"
+    Description: Name for SQS Source Queue 1
+
+  SourceQueue2Name:
+    Type: String
+    Default: "source-queue-2"
+    Description: Name for SQS Source Queue 2
+
+  DLQ1Name:
+    Type: String
+    Default: "source-queue-1-dlq"
+    Description: Name for Dead Letter Queue 1
+
+  DLQ2Name:
+    Type: String
+    Default: "source-queue-2-dlq"
+    Description: Name for Dead Letter Queue 2
+
+  ApiDestination1Endpoint:
+    Type: String
+    Default: "https://test1.devyoufactorstech.com"
+    Description: Invocation endpoint URL for API Destination 1
+
+  ApiDestination2Endpoint:
+    Type: String
+    Default: "https://xyz.devyoufactorstech.com"
+    Description: Invocation endpoint URL for API Destination 2
+
+  # --- API Destination tuning ---
+  ApiInvocationRateLimit:
+    Type: Number
+    Default: 300
+    Description: Max invocations per second for both API Destinations (lower in dev, higher in prod)
+
+  # --- SQS tuning ---
+  QueueVisibilityTimeout:
+    Type: Number
+    Default: 300
+    Description: SQS visibility timeout in seconds (should be >= Lambda timeout)
+
+  QueueMaxReceiveCount:
+    Type: Number
+    Default: 3
+    Description: Number of receive attempts before a message is sent to the DLQ
+
+  DLQMessageRetentionPeriod:
+    Type: Number
+    Default: 1209600
+    Description: DLQ message retention in seconds (default 14 days; e.g. 86400 for dev, 1209600 for prod)
+
+  # --- EventBridge Pipe tuning ---
+  PipeBatchSize:
+    Type: Number
+    Default: 1
+    Description: Number of SQS messages each Pipe passes to the API Destination per invocation
+
+  PipeBatchingWindow:
+    Type: Number
+    Default: 0
+    Description: Seconds the Pipe waits to accumulate messages before invoking (0 = immediate)
+
+  # --- Lambda tuning ---
+  LambdaTimeout:
+    Type: Number
+    Default: 30
+    Description: Lambda function timeout in seconds
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 128
+    Description: Lambda function memory in MB (128–10240)
+
+Resources:
+
+  # ----------------------------------------------------------
+  # DEAD LETTER QUEUES
+  # ----------------------------------------------------------
+  DLQ1:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref DLQ1Name
+      MessageRetentionPeriod: !Ref DLQMessageRetentionPeriod
+
+  DLQ2:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref DLQ2Name
+      MessageRetentionPeriod: !Ref DLQMessageRetentionPeriod
+
+  # ----------------------------------------------------------
+  # SQS SOURCE QUEUES
+  # ----------------------------------------------------------
+  SourceQueue1:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref SourceQueue1Name
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQ1.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  SourceQueue2:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref SourceQueue2Name
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQ2.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS — Queue Names and URLs
+  # Stored under /{StackName}/sqs/... so other systems can
+  # reference queues without hardcoding names or URLs
+  # ----------------------------------------------------------
+  SSMSourceQueue1Name:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-1/name"
+      Type: String
+      Value: !Ref SourceQueue1Name
+      Description: Name of SQS Source Queue 1
+
+  SSMSourceQueue1Url:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-1/url"
+      Type: String
+      Value: !Ref SourceQueue1
+      Description: URL of SQS Source Queue 1
+
+  SSMSourceQueue2Name:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-2/name"
+      Type: String
+      Value: !Ref SourceQueue2Name
+      Description: Name of SQS Source Queue 2
+
+  SSMSourceQueue2Url:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-2/url"
+      Type: String
+      Value: !Ref SourceQueue2
+      Description: URL of SQS Source Queue 2
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS — DLQ Names and URLs
+  # ----------------------------------------------------------
+  SSMDLQ1Name:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-1-dlq/name"
+      Type: String
+      Value: !Ref DLQ1Name
+      Description: Name of Dead Letter Queue 1
+
+  SSMDLQ1Url:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-1-dlq/url"
+      Type: String
+      Value: !Ref DLQ1
+      Description: URL of Dead Letter Queue 1
+
+  SSMDLQ2Name:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-2-dlq/name"
+      Type: String
+      Value: !Ref DLQ2Name
+      Description: Name of Dead Letter Queue 2
+
+  SSMDLQ2Url:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/sqs/source-queue-2-dlq/url"
+      Type: String
+      Value: !Ref DLQ2
+      Description: URL of Dead Letter Queue 2
+
+  # ----------------------------------------------------------
+  # EVENTBRIDGE CONNECTIONS (API Key auth, placeholder values)
+  # ----------------------------------------------------------
+  Connection1:
+    Type: AWS::Events::Connection
+    Properties:
+      Description: Connection for API Destination 1
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref ApiKeyHeaderName
+          ApiKeyValue: !Ref ApiKey1Value
+
+  Connection2:
+    Type: AWS::Events::Connection
+    Properties:
+      Description: Connection for API Destination 2
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref ApiKeyHeaderName
+          ApiKeyValue: !Ref ApiKey2Value
+
+  # ----------------------------------------------------------
+  # EVENTBRIDGE API DESTINATIONS
+  # ----------------------------------------------------------
+  ApiDestination1:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Description: API Destination for test1.devyoufactorstech.com
+      ConnectionArn: !GetAtt Connection1.Arn
+      InvocationEndpoint: !Ref ApiDestination1Endpoint
+      HttpMethod: POST
+      InvocationRateLimitPerSecond: !Ref ApiInvocationRateLimit
+
+  ApiDestination2:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Description: API Destination for xyz.devyoufactorstech.com
+      ConnectionArn: !GetAtt Connection2.Arn
+      InvocationEndpoint: !Ref ApiDestination2Endpoint
+      HttpMethod: POST
+      InvocationRateLimitPerSecond: !Ref ApiInvocationRateLimit
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS — EventBridge Connections
+  # ----------------------------------------------------------
+  SSMConnection1Arn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/eventbridge/connection-1/arn"
+      Type: String
+      Value: !GetAtt Connection1.Arn
+      Description: ARN of EventBridge Connection 1
+
+  SSMConnection2Arn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/eventbridge/connection-2/arn"
+      Type: String
+      Value: !GetAtt Connection2.Arn
+      Description: ARN of EventBridge Connection 2
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS — API Destinations
+  # ----------------------------------------------------------
+  SSMApiDestination1Arn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/eventbridge/api-destination-1/arn"
+      Type: String
+      Value: !GetAtt ApiDestination1.Arn
+      Description: ARN of API Destination 1
+
+  SSMApiDestination2Arn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/eventbridge/api-destination-2/arn"
+      Type: String
+      Value: !GetAtt ApiDestination2.Arn
+      Description: ARN of API Destination 2
+
+  # ----------------------------------------------------------
+  # IAM MANAGED POLICY FOR EVENTBRIDGE PIPES
+  # Minimum permissions: read SQS + invoke API Destinations
+  # + Secrets Manager access for Connection credentials
+  # ----------------------------------------------------------
+  PipesManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Minimum permissions for EventBridge Pipes to read SQS and invoke API Destinations
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SQSReadPermissions
+            Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource:
+              - !GetAtt SourceQueue1.Arn
+              - !GetAtt SourceQueue2.Arn
+          - Sid: ApiDestinationInvokePermissions
+            Effect: Allow
+            Action:
+              - events:InvokeApiDestination
+            Resource:
+              - !GetAtt ApiDestination1.Arn
+              - !GetAtt ApiDestination2.Arn
+          - Sid: SecretsManagerPermissions
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource:
+              - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:events!connection/*"
+
+  # ----------------------------------------------------------
+  # IAM ROLE FOR EVENTBRIDGE PIPES
+  # ----------------------------------------------------------
+  PipesExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pipes.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - !Ref PipesManagedPolicy
+
+  # ----------------------------------------------------------
+  # IAM MANAGED POLICY FOR LAMBDA
+  # Minimum permissions: send messages to both SQS queues
+  # ----------------------------------------------------------
+  LambdaManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Minimum permissions for Lambda to send messages to both SQS source queues
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SQSSendPermissions
+            Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource:
+              - !GetAtt SourceQueue1.Arn
+              - !GetAtt SourceQueue2.Arn
+          - Sid: SSMReadPermissions
+            Effect: Allow
+            Action:
+              - ssm:GetParameters
+            Resource:
+              - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/sqs/*"
+
+  # ----------------------------------------------------------
+  # IAM ROLE FOR LAMBDA
+  # ----------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref LambdaManagedPolicy
+
+  # ----------------------------------------------------------
+  # LAMBDA FUNCTION
+  # Sends a message to both SQS source queues
+  # Queue URLs passed directly via environment variables
+  # ----------------------------------------------------------
+  SQSMessageSenderLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Sends a message to both SQS source queues
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Environment:
+        Variables:
+          QUEUE1_URL_PARAM: !Sub "/${AWS::StackName}/sqs/source-queue-1/url"
+          QUEUE2_URL_PARAM: !Sub "/${AWS::StackName}/sqs/source-queue-2/url"
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          sqs = boto3.client('sqs')
+          ssm = boto3.client('ssm')
+
+          # Cache queue URLs after first SSM fetch (reused on warm invocations)
+          _queue_urls = {}
+
+          def get_queue_urls():
+              global _queue_urls
+              if _queue_urls:
+                  return _queue_urls
+              param1 = os.environ['QUEUE1_URL_PARAM']
+              param2 = os.environ['QUEUE2_URL_PARAM']
+              response = ssm.get_parameters(Names=[param1, param2])
+              if response.get('InvalidParameters'):
+                  raise ValueError(f"SSM parameters not found: {response['InvalidParameters']}")
+              _queue_urls = {p['Name']: p['Value'] for p in response['Parameters']}
+              return _queue_urls
+
+          def lambda_handler(event, context):
+              urls = get_queue_urls()
+              queue1_url = urls[os.environ['QUEUE1_URL_PARAM']]
+              queue2_url = urls[os.environ['QUEUE2_URL_PARAM']]
+
+              message_body = json.dumps(event) if event else json.dumps({
+                  "source": "lambda",
+                  "message": "Hello from Lambda!"
+              })
+
+              results = []
+
+              # Send to Queue 1
+              try:
+                  response1 = sqs.send_message(
+                      QueueUrl=queue1_url,
+                      MessageBody=message_body
+                  )
+                  logger.info(f"Sent to Queue 1: {response1['MessageId']}")
+                  results.append({
+                      "queue": "source-queue-1",
+                      "messageId": response1['MessageId'],
+                      "status": "success"
+                  })
+              except Exception as e:
+                  logger.error(f"Failed to send to Queue 1: {str(e)}")
+                  results.append({
+                      "queue": "source-queue-1",
+                      "error": str(e),
+                      "status": "failed"
+                  })
+
+              # Send to Queue 2
+              try:
+                  response2 = sqs.send_message(
+                      QueueUrl=queue2_url,
+                      MessageBody=message_body
+                  )
+                  logger.info(f"Sent to Queue 2: {response2['MessageId']}")
+                  results.append({
+                      "queue": "source-queue-2",
+                      "messageId": response2['MessageId'],
+                      "status": "success"
+                  })
+              except Exception as e:
+                  logger.error(f"Failed to send to Queue 2: {str(e)}")
+                  results.append({
+                      "queue": "source-queue-2",
+                      "error": str(e),
+                      "status": "failed"
+                  })
+
+              return {
+                  "statusCode": 200,
+                  "body": json.dumps({
+                      "message": "Lambda executed successfully",
+                      "results": results
+                  })
+              }
+
+  # ----------------------------------------------------------
+  # EVENTBRIDGE PIPE 1 — SourceQueue1 → ApiDestination1
+  # ----------------------------------------------------------
+  Pipe1:
+    Type: AWS::Pipes::Pipe
+    Properties:
+      Description: Pipe from SourceQueue1 to ApiDestination1
+      RoleArn: !GetAtt PipesExecutionRole.Arn
+      Source: !GetAtt SourceQueue1.Arn
+      SourceParameters:
+        SqsQueueParameters:
+          BatchSize: !Ref PipeBatchSize
+          MaximumBatchingWindowInSeconds: !Ref PipeBatchingWindow
+      Target: !GetAtt ApiDestination1.Arn
+
+  # ----------------------------------------------------------
+  # EVENTBRIDGE PIPE 2 — SourceQueue2 → ApiDestination2
+  # ----------------------------------------------------------
+  Pipe2:
+    Type: AWS::Pipes::Pipe
+    Properties:
+      Description: Pipe from SourceQueue2 to ApiDestination2
+      RoleArn: !GetAtt PipesExecutionRole.Arn
+      Source: !GetAtt SourceQueue2.Arn
+      SourceParameters:
+        SqsQueueParameters:
+          BatchSize: !Ref PipeBatchSize
+          MaximumBatchingWindowInSeconds: !Ref PipeBatchingWindow
+      Target: !GetAtt ApiDestination2.Arn
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS — Lambda
+  # ----------------------------------------------------------
+  SSMLambdaFunctionName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/lambda/function-name"
+      Type: String
+      Value: !Ref SQSMessageSenderLambda
+      Description: Name of the SQS message sender Lambda function
+
+  SSMLambdaFunctionArn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/lambda/function-arn"
+      Type: String
+      Value: !GetAtt SQSMessageSenderLambda.Arn
+      Description: ARN of the SQS message sender Lambda function
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS — EventBridge Pipes
+  # ----------------------------------------------------------
+  SSMPipe1Arn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/eventbridge/pipe-1/arn"
+      Type: String
+      Value: !GetAtt Pipe1.Arn
+      Description: ARN of EventBridge Pipe 1 (SourceQueue1 to ApiDestination1)
+
+  SSMPipe2Arn:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/eventbridge/pipe-2/arn"
+      Type: String
+      Value: !GetAtt Pipe2.Arn
+      Description: ARN of EventBridge Pipe 2 (SourceQueue2 to ApiDestination2)
+
+# ============================================================
+# OUTPUTS
+# ============================================================
+Outputs:
+
+  StackName:
+    Description: Stack name — use as prefix for all SSM parameter paths (/${StackName}/...)
+    Value: !Ref AWS::StackName

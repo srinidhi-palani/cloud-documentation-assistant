@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EventBridge Event Bus, Rule, API Destination and CloudWatch Logs
+
+Parameters:
+
+  EventBusName:
+    Type: String
+    Default: null
+
+  EventRuleName:
+    Type: String
+    Default: null
+
+  EventSource:
+    Type: String
+    Default: null
+
+  EventDetailType:
+    Type: String
+    Default: null
+
+  ApiDestinationName:
+    Type: String
+    Default: null
+
+  ApiEndpoint:
+    Type: String
+    Default: null
+
+  LogGroupName:
+    Type: String
+    Default: null
+
+Resources:
+
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref EventBusName
+
+  EventBridgeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref LogGroupName
+      RetentionInDays: 30
+
+  ApiConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      Name: !Sub "${ApiDestinationName}-connection"
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: dummy
+          ApiKeyValue: dummy
+
+  ApiDestination:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: !Ref ApiDestinationName
+      ConnectionArn: !GetAtt ApiConnection.Arn
+      InvocationEndpoint: !Ref ApiEndpoint
+      HttpMethod: PUT
+      InvocationRateLimitPerSecond: 10
+
+  EventBridgeTargetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EventRuleName}-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+        - PolicyName: EventBridgeInvokeTargets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:InvokeApiDestination
+                Resource: !GetAtt ApiDestination.Arn
+
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "${EventBridgeLogGroup.Arn}:*"
+
+  UpdateChannelCountRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Ref EventRuleName
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source:
+          - !Ref EventSource
+        detail-type:
+          - !Ref EventDetailType
+
+      Targets:
+        - Id: ApiDestinationTarget
+          Arn: !GetAtt ApiDestination.Arn
+          RoleArn: !GetAtt EventBridgeTargetRole.Arn
+
+        - Id: CloudWatchLogsTarget
+          Arn: !GetAtt EventBridgeLogGroup.Arn
+
+Outputs:
+
+  EventBusArn:
+    Value: !GetAtt EventBus.Arn
+
+  EventBusName:
+    Value: !Ref EventBus
+
+  EventRuleName:
+    Value: !Ref EventRuleName
+
+  ApiDestinationArn:
+    Value: !GetAtt ApiDestination.Arn

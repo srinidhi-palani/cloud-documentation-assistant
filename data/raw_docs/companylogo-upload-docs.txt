@@ -1,0 +1,39 @@
+Template: companylogo-upload.yml
+Category: Lambda / API Gateway / S3 / CloudFront
+
+Purpose:
+This template creates infrastructure for uploading company logos to S3 via a pre-signed URL. It uses API Gateway and Lambda to generate pre-signed URLs securely, then serves the uploaded logos via CloudFront CDN.
+
+AWS Services Used:
+- AWS Lambda: Generates pre-signed S3 upload URLs
+- Amazon API Gateway: REST API endpoint for logo upload requests
+- Amazon S3: Stores uploaded company logo assets
+- Amazon CloudFront: CDN for serving logos globally
+- AWS CodeBuild: Builds and deploys the Lambda function from GitHub
+- AWS Route53: DNS configuration for the upload domain
+- AWS Certificate Manager (ACM): SSL/TLS certificates for HTTPS
+
+Key Features:
+- Pre-signed URL generation for secure direct S3 uploads
+- CORS support with configurable allowed origins
+- CDN delivery via CloudFront for fast logo serving
+- Custom domain support via Route53 and ACM
+- Automated Lambda deployment via CodeBuild from GitHub
+- Configurable URL expiry time for pre-signed URLs
+
+Parameters:
+- lambdaRuntime: Lambda runtime environment
+- s3uploadlambda: Lambda function name
+- uploadbucket: S3 destination bucket name
+- gatewaystage: API Gateway deployment stage
+- RegionalCertificateArn: ACM certificate for API Gateway
+- CDNCertificateArn: ACM certificate for CloudFront
+- uploads3domainurl: Custom domain for upload API
+- lambdagithubrepo: GitHub repository for Lambda code
+- AllowedOrigin: CORS allowed origins
+- urlexpirytime: Pre-signed URL expiry duration
+
+Use Cases:
+- Allow users to upload company logos from a web application
+- Secure file upload without exposing AWS credentials
+- Serve uploaded logos via CDN for performance

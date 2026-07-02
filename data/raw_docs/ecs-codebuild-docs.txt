@@ -1,0 +1,40 @@
+Template: ecs-codebuild.yml
+Category: CodeBuild / ECR / CI-CD Pipeline
+
+Purpose:
+This template creates CodeBuild projects and ECR repositories for building Docker images for multiple API services and pushing them to ECR. It supports ssi, feeds, courseengine, courseenginev2, capsuleengine, and notification engine APIs.
+
+AWS Services Used:
+- AWS CodeBuild: CI/CD build projects for each API service
+- Amazon ECR: Container image repositories for each service
+- AWS IAM: CodeBuild execution roles and policies
+- Amazon S3: Build artifact storage
+- AWS CloudFront: Key pair for CloudFront distribution
+
+Key Features:
+- Separate ECR repository per service
+- Configurable image retention policy per ECR repo
+- CodeBuild projects connected to GitHub repositories
+- Automated Docker image build and push to ECR
+- Configurable branch per service for flexible deployments
+
+Services Supported:
+- ssiapi: SSI API service
+- feedsapi: Feeds API service
+- courseengineapi: Course Engine API
+- courseengineapiv2: Course Engine API v2
+- capsuleengapi: Capsule Engine API
+- notifyengapi: Notification Engine API
+
+Parameters:
+- ecrimageretain: Number of Docker images to retain per ECR repo
+- cloudfrontkey: CloudFront PEM key file name
+- *ecr parameters: ECR repo names for each service
+- *codebuild parameters: CodeBuild project names for each service
+- *GithubRepo parameters: GitHub repo URLs for each service
+
+Use Cases:
+- Automated Docker image builds on code push
+- ECR image lifecycle management
+- Multi-service CI/CD pipeline
+- Build and deploy microservices to ECS

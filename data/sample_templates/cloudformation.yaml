@@ -1,0 +1,3544 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "This template creates an ecs cluster to for api within the 1st 3 AZ's of private subnet. **Services used in template:ecs cluster,load balancer,cloudwatchloggroup,ec2 launch template,autoscaling group,securitygroup,route53**"
+Parameters:
+  ECSCluster:
+    Type: String
+    Default: null
+    Description: ECS cluster name
+
+  KeyName:
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: null
+    Description: Amazon EC2 Key Pair.
+
+  VpcId:
+    Type: 'String'
+    Default: null
+    Description: Select a VPC that allows instances to access the Internet.
+
+  publicsubnetid:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Default: null
+    Description: Enter 3 public subnets which are in each az for loadbalancer
+
+  privatesubnetid:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Default: null
+    Description: Enter 3 private subnets which are in each az for ec2.
+
+  DesiredCapacityec2:
+    Type: Number
+    Default: null
+    Description: Number of desired instances to launch in autoscaling group.
+
+  DesiredCapacity:
+    Type: Number
+    Default: null
+    Description: Number of desired docker containers to launch in your ECS cluster per service.
+
+  MaxSize:
+    Type: Number
+    Default: null
+    Description: Maximum number of instances that can be launched in your ECS cluster.
+
+  ContainerMaxCapacity:
+    Type: Number
+    Default: null
+    Description: Enter the maximum number of container to run per api 
+   
+  logretention:
+    Type: Number
+    Default: null
+    Description: Enter the cloudwatch log retention in days for ecs task
+
+  LoadBalancerName:
+    Type: String
+    Default: null
+    Description: Load balancer name to create
+      
+  Certificate:
+    Type: String
+    Default: null
+    Description: Enter the Certificate arn for domain
+
+  ssiecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for ssiapi with tag
+
+  ssiport:
+    Type: Number
+    Default: null
+    Description: Port number for ssi api
+
+  ssiapiurl:
+    Type: String
+    Default: null
+    Description: ssi api url
+
+  ssihealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for ssiapi
+
+  ssisercon:
+    Type: String
+    Default: null
+    Description: ssi api docker container and ecs service name
+
+  ssipriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for ssi api
+
+  feedsecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for feedsapi with tag
+
+  feedsport:
+    Type: Number
+    Default: null
+    Description: Port number for feeds api
+
+  feedsapiurl:
+    Type: String
+    Default: null
+    Description: feeds url
+
+  feedshealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for feeds
+
+  feedssercon:
+    Type: String
+    Default: null
+    Description: feeds docker container and ecs service name
+
+  feedspriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for feeds api
+
+  courseengineecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for courseengineapi with tag
+
+  courseengineport:
+    Type: Number
+    Default: null
+    Description: Port number for courseengine api
+
+  courseengineapiurl:
+    Type: String
+    Default: null
+    Description: courseengine url
+
+  courseenginehealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for courseengine
+
+  courseenginesercon:
+    Type: String
+    Default: null
+    Description: courseengine docker container and ecs service name
+
+  courseenginepriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for courseengine api
+
+  courseenginev2ecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for courseenginev2api with tag
+
+  courseenginev2Port:
+    Type: Number
+    Default: null
+    Description: Port number for courseenginev2api api
+
+  courseenginev2apiurl:
+    Type: String
+    Default: null
+    Description: courseenginev2 url
+
+  courseenginev2HealthCheckPath:
+    Type: String
+    Default: null
+    Description: health check path for courseenginev2
+
+  courseenginev2sercon:
+    Type: String
+    Default: null
+    Description: courseenginev2 docker container and ecs service name
+
+  courseenginev2priority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for courseenginev2 api
+
+  capsuleengineecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for capsuleengineapi with tag
+
+  capsuleenginePort:
+    Type: Number
+    Default: null
+    Description: Port number for capsuleengine api
+
+  capsuleengineapiurl:
+    Type: String
+    Default: null
+    Description: capsuleengine url
+
+  capsuleengineoolHealthCheckPath:
+    Type: String
+    Default: null
+    Description: health check path for capsuleengine
+
+  capsuleenginesercon:
+    Type: String
+    Default: null
+    Description: capsuleengine docker container and ecs service name
+
+  capsuleenginepriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for capsuleengine api
+
+  tysimportuserecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysimportuserapi with tag
+
+  tysimportuserport:
+    Type: Number
+    Default: null
+    Description: Port number for tysimportuser api
+
+  tysimportuserapiurl:
+    Type: String
+    Default: null
+    Description: tysimportuser api url
+
+  tysimportuserhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysimportuserapi
+
+  tysimportusersercon:
+    Type: String
+    Default: null
+    Description: tysimportuser api docker container and ecs service name
+
+  tysimportuserpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-importuser
+
+  tysuserecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysuserapi with tag
+
+  tysuserport:
+    Type: Number
+    Default: null
+    Description: Port number for tysuser api
+
+  tysuserapiurl:
+    Type: String
+    Default: null
+    Description: tysuser url
+
+  tysuserhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysuser
+
+  tysusersercon:
+    Type: String
+    Default: null
+    Description: tysuser docker container and ecs service name
+
+  tysuserpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-user
+
+  tysproductecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysproduct with tag
+
+  tysproductport:
+    Type: Number
+    Default: null
+    Description: Port number for tysproduct api
+
+  tysproductapiurl:
+    Type: String
+    Default: null
+    Description: tysproduct url
+
+  tysproducthealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysproduct
+
+  tysproductsercon:
+    Type: String
+    Default: null
+    Description: tysproduct docker container and ecs service name
+
+  tysproductpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-product
+
+  tyschannelecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tyschannelapi with tag
+
+  tyschannelport:
+    Type: Number
+    Default: null
+    Description: Port number for tyschannel api
+
+  tyschannelapiurl:
+    Type: String
+    Default: null
+    Description: tyschannel url
+
+  tyschannelhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tyschannel
+
+  tyschannelsercon:
+    Type: String
+    Default: null
+    Description: tyschannel docker container and ecs service name
+
+  tyschannelpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-channel
+
+  tyscoursetrackecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tyscoursetrackapi with tag
+
+  tyscoursetrackport:
+    Type: Number
+    Default: null
+    Description: Port number for tyscoursetrack api
+
+  tyscoursetrackapiurl:
+    Type: String
+    Default: null
+    Description: tyscoursetrack url
+
+  tyscoursetrackhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tyscoursetrack
+
+  tyscoursetracksercon:
+    Type: String
+    Default: null
+    Description: tyscoursetrack docker container and ecs service name
+
+  tyscoursetrackpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-coursetrack
+
+  tyscoursetrackcomecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tyscoursetrackcomapi with tag
+
+  tyscoursetrackcomport:
+    Type: Number
+    Default: null
+    Description: Port number for tyscoursetrackcom api
+
+  tyscoursetrackcomapiurl:
+    Type: String
+    Default: null
+    Description: tyscoursetrackcom url
+
+  tyscoursetrackcomhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tyscoursetrackcom
+
+  tyscoursetrackcomsercon:
+    Type: String
+    Default: null
+    Description: tyscoursetrackcom docker container and ecs service name
+
+  tyscoursetrackcompriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-coursetrackcom
+
+  tyshabitcardecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tyshabitcardapi with tag
+
+  tyshabitcardport:
+    Type: Number
+    Default: null
+    Description: Port number for tyshabitcard api
+
+  tyshabitcardapiurl:
+    Type: String
+    Default: null
+    Description: tyshabitcard url
+
+  tyshabitcardhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tyshabitcard
+
+  tyshabitcardsercon:
+    Type: String
+    Default: null
+    Description: tyshabitcard docker container and ecs service name
+
+  tyshabitcardpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-habitcard
+
+  tysemailecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysemailapi with tag
+
+  tysemailport:
+    Type: Number
+    Default: null
+    Description: Port number for tysemail api
+
+  tysemailapiurl:
+    Type: String
+    Default: null
+    Description: tysemail url
+
+  tysemailhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysemail
+
+  tysemailsercon:
+    Type: String
+    Default: null
+    Description: tysemail docker container and ecs service name
+
+  tysemailpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-email 
+
+  tystrialsignupecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tystrialsignupapi with tag
+
+  tystrialsignupport:
+    Type: Number
+    Default: null
+    Description: Port number for tystrialsignup api
+
+  tystrialsignupapiurl:
+    Type: String
+    Default: null
+    Description: tystrialsignup url
+
+  tystrialsignuphealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tystrialsignup
+
+  tystrialsignupsercon:
+    Type: String
+    Default: null
+    Description: tystrialsignup docker container and ecs service name
+
+  tystrialsignuppriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-trialsignup
+
+  tysnotificationecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysnotificationapi with tag
+
+  tysnotificationport:
+    Type: Number
+    Default: null
+    Description: Port number for tysnotification api
+
+  tysnotificationapiurl:
+    Type: String
+    Default: null
+    Description: tysnotificationurl
+
+  tysnotificationhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysnotification
+
+  tysnotificationsercon:
+    Type: String
+    Default: null
+    Description: tysnotification docker container and ecs service name
+
+  tysnotificationpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-notification 
+
+  tysinappnotificationecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysinappnotificationapi with tag
+
+  tysinappnotificationport:
+    Type: Number
+    Default: null
+    Description: Port number for tysinappnotification api
+
+  tysinappnotificationapiurl:
+    Type: String
+    Default: null
+    Description: tysinappnotificationurl
+
+  tysinappnotificationhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysinappnotification
+
+  tysinappnotificationsercon:
+    Type: String
+    Default: null
+    Description: tysinappnotification docker container and ecs service name
+
+  tysinappnotificationpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-inappnotification   
+
+  tyscrs3ecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tyscrs3api with tag
+
+  tyscrs3port:
+    Type: Number
+    Default: null
+    Description: Port number for tyscrs3 api
+
+  tyscrs3apiurl:
+    Type: String
+    Default: null
+    Description: tyscrs3url
+
+  tyscrs3healthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tyscrs3
+
+  tyscrs3sercon:
+    Type: String
+    Default: null
+    Description: tyscrs3 docker container and ecs service name
+
+  tyscrs3priority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-crs3  
+
+  tyssurveyecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tyssurveyapi with tag
+
+  tyssurveyport:
+    Type: Number
+    Default: null
+    Description: Port number for tyssurvey api
+
+  tyssurveyapiurl:
+    Type: String
+    Default: null
+    Description: tyssurveyurl
+
+  tyssurveyhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tyssurvey
+
+  tyssurveysercon:
+    Type: String
+    Default: null
+    Description: tyssurvey docker container and ecs service name
+
+  tyssurveypriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-survey   
+
+  tystrainingecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tystrainingapi with tag
+
+  tystrainingport:
+    Type: Number
+    Default: null
+    Description: Port number for tystraining api
+
+  tystrainingapiurl:
+    Type: String
+    Default: null
+    Description: tystrainingurl
+
+  tystraininghealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tystraining
+
+  tystrainingsercon:
+    Type: String
+    Default: null
+    Description: tystraining docker container and ecs service name
+
+  tystrainingpriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-survey   
+
+  tysapigatewayecrimage:
+    Type: String
+    Default: null
+    Description: ECR image for tysapigatewayapi with tag
+
+  tysapigatewayport:
+    Type: Number
+    Default: null
+    Description: Port number for tysapigateway api
+
+  tysapigatewayapiurl:
+    Type: String
+    Default: null
+    Description: tysapigatewayurl
+
+  tysapigatewayhealthcheckpath:
+    Type: String
+    Default: null
+    Description: health check path for tysapigateway
+
+  tysapigatewaysercon:
+    Type: String
+    Default: null
+    Description: tysapigateway docker container and ecs service name
+
+  tysapigatewaypriority:
+    Type: Number
+    Default: null
+    Description: Load balancer rule priority for tys-survey                      
+  
+  ec2launchtemp:
+    Type: String
+    Default: null
+    Description: launch template name
+
+  ec2volume:
+    Type: Number
+    Default: null
+    Description: Enter the ebs volume size 
+
+  ebstermination:
+    Type: String
+    Default: null
+    Description: Delete EBS volume when ec2 terminates
+    AllowedValues:
+      - true
+      - false
+  
+  DynamoDBTableName:
+    Type: String
+    Default: null
+    Description: DynamoDB table name pattern
+
+  CompanyAssetsBucket:
+    Type: String
+    Default: null
+    Description: S3 bucket for company assets
+
+  ImpressBucket:
+    Type: String
+    Default: null
+    Description: S3 bucket for impress resources
+
+  SNSApnsArn:
+    Type: String
+    Default: null
+    Description: SNS APNS Platform ARN
+
+  SNSGcmArn:
+    Type: String
+    Default: null
+    Description: SNS GCM Platform ARN
+
+  environmenttype:
+    Type: String
+    Default: null
+    Description: Choose the required environment.
+    AllowedValues:
+      - QA
+      - UAT
+      - Prod
+
+  route53zoneid:
+    Type: String
+    Default: null
+    Description: Enter the route53 hosted zone id
+    
+Mappings:
+  AWSRegionToAMI:
+    us-east-1:
+      AMIID: ami-0fa1ca9559f1892ec
+    eu-central-1:
+      AMIID: ami-0444794b421ec32e4
+    ap-south-1:
+      AMIID: ami-03cb1380eec7cc118
+
+  Environments:
+    QA:
+      instancetype: 't4g.small'
+      dockercpu: '256'
+      dockermemory: '512'
+    UAT:
+      instancetype: 't4g.small'
+      dockercpu: '300'
+      dockermemory: '512'
+    Prod:
+      instancetype: 't4g.medium'
+      dockercpu: '360'
+      dockermemory: '720'
+
+Resources:
+  Cluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Ref ECSCluster
+      ClusterSettings:
+       - Name: containerInsights
+         Value: enabled
+
+  EcsSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: !Sub ${ECSCluster}-api
+      GroupDescription: !Sub Security Group for ${ECSCluster} ECS cluster and ${LoadBalancerName} loadbalancer.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: !Ref ssiport
+        ToPort: !Ref ssiport
+        CidrIp:  0.0.0.0/0
+        Description: ssi port 
+      - IpProtocol: tcp
+        FromPort: !Ref feedsport
+        ToPort: !Ref feedsport
+        CidrIp:  0.0.0.0/0
+        Description: feeds port
+      - IpProtocol: tcp
+        FromPort: !Ref courseengineport
+        ToPort: !Ref courseengineport
+        CidrIp:  0.0.0.0/0
+        Description: courseengine port
+      - IpProtocol: tcp
+        FromPort: !Ref courseenginev2Port
+        ToPort: !Ref courseenginev2Port
+        CidrIp:  0.0.0.0/0
+        Description: courseenginev2 port
+      - IpProtocol: tcp
+        FromPort: !Ref capsuleenginePort
+        ToPort: !Ref capsuleenginePort
+        CidrIp:  0.0.0.0/0
+        Description: capsuleengine port
+      - IpProtocol: tcp
+        FromPort: !Ref tysimportuserport
+        ToPort: !Ref tysimportuserport
+        CidrIp:  0.0.0.0/0
+        Description: importuser port
+      - IpProtocol: tcp
+        FromPort: !Ref tysuserport
+        ToPort: !Ref tysuserport
+        CidrIp:  0.0.0.0/0
+        Description: user port
+      - IpProtocol: tcp
+        FromPort: !Ref tysproductport
+        ToPort: !Ref tysproductport
+        CidrIp:  0.0.0.0/0
+        Description: product port
+      - IpProtocol: tcp
+        FromPort: !Ref tyschannelport
+        ToPort: !Ref tyschannelport
+        CidrIp:  0.0.0.0/0
+        Description: channel port
+      - IpProtocol: tcp
+        FromPort: !Ref tyscoursetrackcomport
+        ToPort: !Ref tyscoursetrackcomport
+        CidrIp:  0.0.0.0/0
+        Description: tyscoursetrackcomport 
+      - IpProtocol: tcp
+        FromPort: !Ref tyscoursetrackport
+        ToPort: !Ref tyscoursetrackport
+        CidrIp:  0.0.0.0/0
+        Description: tyscoursetrackport 
+      - IpProtocol: tcp
+        FromPort: !Ref tyshabitcardport
+        ToPort: !Ref tyshabitcardport
+        CidrIp:  0.0.0.0/0
+        Description: habitcard port 
+      - IpProtocol: tcp
+        FromPort: !Ref tysemailport
+        ToPort: !Ref tysemailport
+        CidrIp:  0.0.0.0/0
+        Description: email port   
+      - IpProtocol: tcp
+        FromPort: !Ref tystrialsignupport
+        ToPort: !Ref tystrialsignupport
+        CidrIp:  0.0.0.0/0
+        Description: trialsignup port 
+      - IpProtocol: tcp
+        FromPort: !Ref tysnotificationport
+        ToPort: !Ref tysnotificationport
+        CidrIp:  0.0.0.0/0
+        Description: notification port   
+      - IpProtocol: tcp
+        FromPort: !Ref tysinappnotificationport
+        ToPort: !Ref tysinappnotificationport
+        CidrIp:  0.0.0.0/0
+        Description: inappnotification port 
+      - IpProtocol: tcp
+        FromPort: !Ref tyscrs3port
+        ToPort: !Ref tyscrs3port
+        CidrIp:  0.0.0.0/0
+        Description: crs3 port    
+      - IpProtocol: tcp
+        FromPort: !Ref tyssurveyport
+        ToPort: !Ref tyssurveyport
+        CidrIp:  0.0.0.0/0
+        Description: survey port  
+      - IpProtocol: tcp
+        FromPort: !Ref tystrainingport
+        ToPort: !Ref tystrainingport
+        CidrIp:  0.0.0.0/0
+        Description: training port 
+      - IpProtocol: tcp
+        FromPort: !Ref tysapigatewayport
+        ToPort: !Ref tysapigatewayport
+        CidrIp:  0.0.0.0/0
+        Description: apigateway port                                                           
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 192.168.0.0/21
+
+  ECSCloudwatchLogsGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub ECS-${ECSCluster}
+      RetentionInDays: !Ref logretention
+
+  ssitaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'ssiapi'
+      ContainerDefinitions:
+        - Name: !Ref ssisercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref ssiecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Ref ECSCloudwatchLogsGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${ssisercon}-api
+          PortMappings:
+            - ContainerPort: !Ref ssiport
+              HostPort: !Ref ssiport
+
+  feedstaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'feedsapi'
+      ContainerDefinitions:
+        - Name: !Ref feedssercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref feedsecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Ref ECSCloudwatchLogsGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${feedssercon}-api
+          PortMappings:
+            - ContainerPort: !Ref feedsport
+              HostPort: !Ref feedsport
+
+  courseenginetaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'courseengineapi'
+      ContainerDefinitions:
+        - Name: !Ref courseenginesercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref courseengineecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Ref ECSCloudwatchLogsGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${courseenginesercon}-api
+          PortMappings:
+            - ContainerPort: !Ref courseengineport
+              HostPort: !Ref courseengineport
+
+  courseenginev2taskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'courseenginev2api'
+      ContainerDefinitions:
+        - Name: !Ref courseenginev2sercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref courseenginev2ecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Ref ECSCloudwatchLogsGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${courseenginev2sercon}-api
+          PortMappings:
+            - ContainerPort: !Ref courseenginev2Port
+              HostPort: !Ref courseenginev2Port     
+
+  capsuleenginetaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'capsuleengineapi'
+      ContainerDefinitions:
+        - Name: !Ref capsuleenginesercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref capsuleengineecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Ref ECSCloudwatchLogsGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${capsuleenginesercon}-api
+          PortMappings:
+            - ContainerPort: !Ref capsuleenginePort
+              HostPort: !Ref capsuleenginePort
+
+  tysimportusertaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'importuserapi'
+      ContainerDefinitions:
+        - Name: !Ref tysimportusersercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysimportuserecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysimportusersercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysimportuserport
+              HostPort: !Ref tysimportuserport
+
+  tysusertaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'userapi'
+      ContainerDefinitions:
+        - Name: !Ref tysusersercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysuserecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysusersercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysuserport
+              HostPort: !Ref tysuserport
+
+  tysproducttaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'productapi'
+      ContainerDefinitions:
+        - Name: !Ref tysproductsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysproductecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysproductsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysproductport
+              HostPort: !Ref tysproductport
+
+  tyschanneltaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'channelapi'
+      ContainerDefinitions:
+        - Name: !Ref tyschannelsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tyschannelecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tyschannelsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tyschannelport
+              HostPort: !Ref tyschannelport
+
+  tyscoursetracktaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'coursetrackapi'
+      ContainerDefinitions:
+        - Name: !Ref tyscoursetracksercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tyscoursetrackecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tyscoursetracksercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tyscoursetrackport
+              HostPort: !Ref tyscoursetrackport
+
+  tyscoursetrackcomtaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'coursetrackcomapi'
+      ContainerDefinitions:
+        - Name: !Ref tyscoursetrackcomsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tyscoursetrackcomecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tyscoursetrackcomsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tyscoursetrackcomport
+              HostPort: !Ref tyscoursetrackcomport
+
+  tyshabitcardtaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'habitcardapi'
+      ContainerDefinitions:
+        - Name: !Ref tyshabitcardsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tyshabitcardecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tyshabitcardsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tyshabitcardport
+              HostPort: !Ref tyshabitcardport
+
+  tysemailtaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'emailapi'
+      ContainerDefinitions:
+        - Name: !Ref tysemailsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysemailecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysemailsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysemailport
+              HostPort: !Ref tysemailport   
+
+  tystrialsignuptaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'trialsignupapi'
+      ContainerDefinitions:
+        - Name: !Ref tystrialsignupsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tystrialsignupecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tystrialsignupsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tystrialsignupport
+              HostPort: !Ref tystrialsignupport 
+
+  tysnotificationtaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'notificationapi'
+      ContainerDefinitions:
+        - Name: !Ref tysnotificationsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysnotificationecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysnotificationsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysnotificationport
+              HostPort: !Ref tysnotificationport  
+
+  tysinappnotificationtaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'inappnotificationapi'
+      ContainerDefinitions:
+        - Name: !Ref tysinappnotificationsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysinappnotificationecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysinappnotificationsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysinappnotificationport
+              HostPort: !Ref tysinappnotificationport                                                  
+
+  tyscrs3taskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'crs3api'
+      ContainerDefinitions:
+        - Name: !Ref tyscrs3sercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tyscrs3ecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tyscrs3sercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tyscrs3port
+              HostPort: !Ref tyscrs3port
+
+  tyssurveytaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'crs3api'
+      ContainerDefinitions:
+        - Name: !Ref tyssurveysercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tyssurveyecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tyssurveysercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tyssurveyport
+              HostPort: !Ref tyssurveyport      
+
+  tystrainingtaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'training'
+      ContainerDefinitions:
+        - Name: !Ref tystrainingsercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tystrainingecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tystrainingsercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tystrainingport
+              HostPort: !Ref tystrainingport  
+
+  tysapigatewaytaskdefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: 'apigateway'
+      ContainerDefinitions:
+        - Name: !Ref tysapigatewaysercon
+          Cpu: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockercpu
+          Memory: !FindInMap
+           - Environments
+           - !Ref environmenttype
+           - dockermemory
+          Essential: 'true'
+          Image: !Ref tysapigatewayecrimage
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: 'True'
+              awslogs-group: !Sub ECS-${ECSCluster}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Sub ${tysapigatewaysercon}-api
+          PortMappings:
+            - ContainerPort: !Ref tysapigatewayport
+              HostPort: !Ref tysapigatewayport                                            
+  ECSALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Ref LoadBalancerName
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: "deletion_protection.enabled"
+          Value: "true"
+      Subnets: !Ref publicsubnetid
+      SecurityGroups:
+        - !Ref EcsSecurityGroup
+
+  HTTPLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ECSServiceRole
+    Properties:
+      LoadBalancerArn: !Ref ECSALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+           Protocol: "HTTPS"
+           Port: "443"
+           Host: "#{host}"
+           Path: "/#{path}"
+           Query: "#{query}"
+           StatusCode: "HTTP_301"
+
+  HTTPSLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: ECSServiceRole
+    Properties:
+      LoadBalancerArn: !Ref ECSALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref Certificate
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref SSIAPITargetGroup
+
+  SSIALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref SSIAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref ssiapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref ssipriority
+
+  FeedsALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref feedsAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref feedsapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref feedspriority
+
+  courseengineALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref courseengineAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref courseengineapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref courseenginepriority
+
+  courseenginev2ALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref courseenginev2APITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref courseenginev2apiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref courseenginev2priority
+
+  capsuleengineALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref capsuleengineAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref capsuleengineapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref capsuleenginepriority
+
+  tysimportuserALBListenerRule:
+    DependsOn: tysimportuserAPITargetGroup
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysimportuserAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysimportuserapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysimportuserpriority
+
+  tysuserALBListenerRule:
+    DependsOn: tysuserAPITargetGroup
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysuserAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysuserapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysuserpriority
+
+  tysproductALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tysproductAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysproductAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysproductapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysproductpriority
+
+  tyschannelALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tyschannelAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tyschannelAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tyschannelapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tyschannelpriority
+
+  tyscoursetrackALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tyscoursetrackAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tyscoursetrackAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tyscoursetrackapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tyscoursetrackpriority
+
+  tyscoursetrackcomALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tyscoursetrackcomAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tyscoursetrackcomAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tyscoursetrackcomapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tyscoursetrackcompriority
+
+  tyshabitcardALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tyshabitcardAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tyshabitcardAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tyshabitcardapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tyshabitcardpriority
+
+  tysemailALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tysemailAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysemailAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysemailapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysemailpriority   
+
+  tystrialsignupALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tystrialsignupAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tystrialsignupAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tystrialsignupapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tystrialsignuppriority  
+
+  tysnotificationALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tysnotificationAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysnotificationAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysnotificationapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysnotificationpriority
+
+  tysinappnotificationALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tysinappnotificationAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysinappnotificationAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysinappnotificationapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysinappnotificationpriority
+
+  tyscrs3ALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tyscrs3APITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tyscrs3APITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tyscrs3apiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tyscrs3priority 
+
+  tyssurveyALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tyssurveyAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tyssurveyAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tyssurveyapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tyssurveypriority  
+
+  tystrainingALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tystrainingAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tystrainingAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tystrainingapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tystrainingpriority  
+
+  tysapigatewayALBListenerRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    DependsOn: tysapigatewayAPITargetGroup
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref tysapigatewayAPITargetGroup
+      Conditions:
+        - Field: host-header
+          Values:
+            - !Ref tysapigatewayapiurl
+      ListenerArn: !Ref HTTPSLoadBalancerListener
+      Priority: !Ref tysapigatewaypriority
+
+  SSIAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${ssisercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref ssihealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref ssiport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  feedsAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${feedssercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref feedshealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref feedsport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  courseengineAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${courseenginesercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref courseenginehealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref courseengineport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  courseenginev2APITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${courseenginev2sercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref courseenginev2HealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref courseenginev2Port
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  capsuleengineAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${capsuleenginesercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref capsuleengineoolHealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref capsuleenginePort
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tysimportuserAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysimportusersercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysimportuserhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysimportuserport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tysuserAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysusersercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysuserhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysuserport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tysproductAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysproductsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysproducthealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysproductport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tyschannelAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tyschannelsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tyschannelhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tyschannelport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tyscoursetrackAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tyscoursetracksercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tyscoursetrackhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tyscoursetrackport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tyscoursetrackcomAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tyscoursetrackcomsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tyscoursetrackcomhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tyscoursetrackcomport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tyshabitcardAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tyshabitcardsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tyshabitcardhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tyshabitcardport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tysemailAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysemailsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysemailhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysemailport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200' 
+
+  tystrialsignupAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tystrialsignupsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tystrialsignuphealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tystrialsignupport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'
+
+  tysnotificationAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysnotificationsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysnotificationhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysnotificationport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'   
+
+  tysinappnotificationAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysinappnotificationsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysinappnotificationhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysinappnotificationport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'  
+
+  tyscrs3APITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tyscrs3sercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tyscrs3healthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tyscrs3port
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'   
+
+  tyssurveyAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tyssurveysercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tyssurveyhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tyssurveyport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'  
+
+  tystrainingAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tystrainingsercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tystraininghealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tystrainingport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'   
+
+  tysapigatewayAPITargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub ${ECSCluster}-${tysapigatewaysercon}
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: !Ref tysapigatewayhealthcheckpath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Port: !Ref tysapigatewayport
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VpcId
+      Matcher:
+        HttpCode: '200'                                                                     
+   
+  ContainerInstances:
+    Type: AWS::EC2::LaunchTemplate
+    Properties: 
+      LaunchTemplateName: !Ref ec2launchtemp
+      LaunchTemplateData: 
+        BlockDeviceMappings: 
+          - Ebs:
+              VolumeSize: !Ref ec2volume
+              VolumeType: gp2
+              DeleteOnTermination: !Ref ebstermination
+              Encrypted: true
+            DeviceName: /dev/xvda
+        CreditSpecification: 
+          CpuCredits: Unlimited
+        Monitoring: 
+          Enabled: false
+        IamInstanceProfile: 
+          Name: !Ref EC2InstanceProfile
+        ImageId: !FindInMap [ AWSRegionToAMI, !Ref 'AWS::Region', AMIID ]
+        InstanceType: !FindInMap [ Environments, !Ref 'environmenttype', instancetype ]
+        KeyName: !Ref KeyName
+        SecurityGroupIds: 
+          - !Ref EcsSecurityGroup
+        UserData:
+          Fn::Base64:
+            !Sub |
+               #!/bin/bash -xe
+               sudo dnf update -y
+               sudo dnf install ecs-init -y
+               sudo echo ECS_CLUSTER=${ECSCluster} | sudo tee -a /etc/ecs/ecs.config
+               sudo echo "ECS_IMAGE_CLEANUP_INTERVAL=30m" | sudo tee -a /etc/ecs/ecs.config
+               sudo echo "ECS_IMAGE_MINIMUM_CLEANUP_AGE=30m" | sudo tee -a /etc/ecs/ecs.config
+               sudo sed -i '/After=cloud-final.service/d' /usr/lib/systemd/system/ecs.service
+               sudo systemctl daemon-reload
+               sudo systemctl enable ecs && sudo systemctl start ecs 
+               sudo systemctl enable docker && systemctl restart sshd
+
+  ECSAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      AvailabilityZones:
+        - !Select [ 0, !GetAZs '' ]
+        - !Select [ 1, !GetAZs '' ]
+        - !Select [ 2, !GetAZs '' ]
+      VPCZoneIdentifier: !Ref privatesubnetid
+      LaunchTemplate: 
+        LaunchTemplateId: !Ref ContainerInstances
+        Version: !GetAtt ContainerInstances.LatestVersionNumber
+      MinSize: '4'
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacityec2
+      Tags:
+        - Key: 'Name'
+          Value: !Sub ${ECSCluster}-asg
+        - Key: 'GuardDutyManaged'
+          Value: 'true'
+          PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: 'true'
+
+  ECSCapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      Name: !Sub ${ECSCluster}-cp
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref ECSAutoScalingGroup
+        ManagedScaling:
+          InstanceWarmupPeriod: 200
+          MaximumScalingStepSize: !Ref MaxSize
+          MinimumScalingStepSize: 1
+          Status: ENABLED
+          TargetCapacity: 75
+
+  ClusterCPAssociation:
+    Type: "AWS::ECS::ClusterCapacityProviderAssociations"
+    Properties:
+      Cluster: !Ref ECSCluster
+      CapacityProviders:
+        - !Ref ECSCapacityProvider
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !Ref ECSCapacityProvider
+          Base: 0
+          Weight: 1
+
+  ssiservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['SSIALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref ssisercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref ssisercon
+          ContainerPort: !Ref ssiport
+          TargetGroupArn: !Ref SSIAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref ssitaskdefinition
+
+  ssiservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${ssisercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ssiservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 20
+        TargetValue: 75
+
+  ssiservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: ssiservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${ssiservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  feedsservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['FeedsALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref feedssercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref feedssercon
+          ContainerPort: !Ref feedsport
+          TargetGroupArn: !Ref feedsAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref feedstaskdefinition
+
+  FeedsServiceScalingPolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${feedssercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref FeedsServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 20
+        TargetValue: 75
+
+  FeedsServiceScalingTarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: feedsservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${feedsservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  courseengineservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['courseengineALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref courseenginesercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref courseenginesercon
+          ContainerPort: !Ref courseengineport
+          TargetGroupArn: !Ref courseengineAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref courseenginetaskdefinition
+
+  courseengineservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${courseenginesercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref courseengineservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 20
+        TargetValue: 75
+
+  courseengineservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: courseengineservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${courseengineservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  courseenginev2service:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['courseenginev2ALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref courseenginev2sercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref courseenginev2sercon
+          ContainerPort: !Ref courseenginev2Port
+          TargetGroupArn: !Ref courseenginev2APITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref courseenginev2taskdefinition
+
+  courseenginev2servicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${courseenginev2sercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref courseenginev2servicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 20
+        TargetValue: 75
+
+  courseenginev2servicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: courseenginev2service
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${courseenginev2service.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  capsuleengineservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn:  ['capsuleengineALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref capsuleenginesercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref capsuleenginesercon
+          ContainerPort: !Ref capsuleenginePort
+          TargetGroupArn: !Ref capsuleengineAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref capsuleenginetaskdefinition
+
+  capsuleengineservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${capsuleenginesercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref capsuleengineservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 20
+        TargetValue: 75
+
+  capsuleengineservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: capsuleengineservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${capsuleengineservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tysimportuserservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysimportuserALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysimportusersercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysimportusersercon
+          ContainerPort: !Ref tysimportuserport
+          TargetGroupArn: !Ref tysimportuserAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysimportusertaskdefinition
+
+  tysimportuserservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysimportusersercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysimportuserservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 20
+        TargetValue: 75
+
+  tysimportuserservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysimportuserservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysimportuserservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tysuserservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysuserALBListenerRule', 'ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysusersercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysusersercon
+          ContainerPort: !Ref tysuserport
+          TargetGroupArn: !Ref tysuserAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysusertaskdefinition
+
+  tysuserServiceScalingPolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysusersercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysuserServiceScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tysuserServiceScalingTarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysuserservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysuserservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tysproductservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysproductALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysproductsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysproductsercon
+          ContainerPort: !Ref tysproductport
+          TargetGroupArn: !Ref tysproductAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysproducttaskdefinition
+
+  tysproductservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysproductsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysproductservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tysproductservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysproductservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysproductservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tyschannelservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tyschannelALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tyschannelsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tyschannelsercon
+          ContainerPort: !Ref tyschannelport
+          TargetGroupArn: !Ref tyschannelAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tyschanneltaskdefinition
+
+  tyschannelservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tyschannelsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tyschannelservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tyschannelservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tyschannelservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tyschannelservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tyscoursetrackservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tyscoursetrackALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tyscoursetracksercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tyscoursetracksercon
+          ContainerPort: !Ref tyscoursetrackport
+          TargetGroupArn: !Ref tyscoursetrackAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tyscoursetracktaskdefinition
+
+  tyscoursetrackservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tyscoursetracksercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tyscoursetrackservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tyscoursetrackservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tyscoursetrackservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tyscoursetrackservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tyscoursetrackcomservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tyscoursetrackcomALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tyscoursetrackcomsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tyscoursetrackcomsercon
+          ContainerPort: !Ref tyscoursetrackcomport
+          TargetGroupArn: !Ref tyscoursetrackcomAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tyscoursetrackcomtaskdefinition
+
+  tyscoursetrackcomservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tyscoursetrackcomsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tyscoursetrackcomservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tyscoursetrackcomservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tyscoursetrackcomservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tyscoursetrackcomservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tyshabitcardservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tyshabitcardALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tyshabitcardsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tyshabitcardsercon
+          ContainerPort: !Ref tyshabitcardport
+          TargetGroupArn: !Ref tyshabitcardAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tyshabitcardtaskdefinition
+
+  tyshabitcardservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tyshabitcardsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tyshabitcardservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tyshabitcardservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tyshabitcardservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tyshabitcardservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tysemailservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysemailALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysemailsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysemailsercon
+          ContainerPort: !Ref tysemailport
+          TargetGroupArn: !Ref tysemailAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysemailtaskdefinition
+
+  tysemailservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysemailsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysemailservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tysemailservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysemailservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysemailservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs   
+
+  tystrialsignupservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tystrialsignupALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tystrialsignupsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tystrialsignupsercon
+          ContainerPort: !Ref tystrialsignupport
+          TargetGroupArn: !Ref tystrialsignupAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tystrialsignuptaskdefinition
+
+  tystrialsignupservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tystrialsignupsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tystrialsignupservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tystrialsignupservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tystrialsignupservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tystrialsignupservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs 
+
+  tysnotificationservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysnotificationALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysnotificationsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysnotificationsercon
+          ContainerPort: !Ref tysnotificationport
+          TargetGroupArn: !Ref tysnotificationAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysnotificationtaskdefinition
+
+  tysnotificationservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysnotificationsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysnotificationservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tysnotificationservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysnotificationservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysnotificationservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs 
+
+  tysinappnotificationservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysinappnotificationALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysinappnotificationsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysinappnotificationsercon
+          ContainerPort: !Ref tysinappnotificationport
+          TargetGroupArn: !Ref tysinappnotificationAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysinappnotificationtaskdefinition
+
+  tysinappnotificationservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysinappnotificationsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysinappnotificationservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tysinappnotificationservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysinappnotificationservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysinappnotificationservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+
+  tyscrs3service:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tyscrs3ALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tyscrs3sercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tyscrs3sercon
+          ContainerPort: !Ref tyscrs3port
+          TargetGroupArn: !Ref tyscrs3APITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tyscrs3taskdefinition
+
+  tyscrs3servicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tyscrs3sercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tyscrs3servicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tyscrs3servicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tyscrs3service
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tyscrs3service.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs   
+
+  tyssurveyservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tyssurveyALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tyssurveysercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tyssurveysercon
+          ContainerPort: !Ref tyssurveyport
+          TargetGroupArn: !Ref tyssurveyAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tyssurveytaskdefinition
+
+  tyssurveyservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tyssurveysercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tyssurveyservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tyssurveyservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tyscrs3service
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tyssurveyservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs   
+
+  tystrainingservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tystrainingALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tystrainingsercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tystrainingsercon
+          ContainerPort: !Ref tystrainingport
+          TargetGroupArn: !Ref tystrainingAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tystrainingtaskdefinition
+
+  tystrainingservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tystrainingsercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tystrainingservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tystrainingservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tystrainingservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tystrainingservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs     
+
+  tysapigatewayservice:
+    Type: 'AWS::ECS::Service'
+    DependsOn: ['tysapigatewayALBListenerRule','ClusterCPAssociation']
+    Properties:
+      ServiceName: !Ref tysapigatewaysercon
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+         MaximumPercent: 200
+         MinimumHealthyPercent: 100
+         DeploymentCircuitBreaker:
+           Enable: true
+           Rollback: true
+      DeploymentController:
+         Type: "ECS"
+      LoadBalancers:
+        - ContainerName: !Ref tysapigatewaysercon
+          ContainerPort: !Ref tysapigatewayport
+          TargetGroupArn: !Ref tysapigatewayAPITargetGroup
+      Role: !Ref ECSServiceRole
+      TaskDefinition: !Ref tysapigatewaytaskdefinition
+
+  tysapigatewayservicescalingpolicy:
+    Type: 'AWS::ApplicationAutoScaling::ScalingPolicy'
+    Properties:
+      PolicyName: !Sub ${ECSCluster}-${tysapigatewaysercon}-cpu75
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref tysapigatewayservicescalingtarget
+      TargetTrackingScalingPolicyConfiguration:
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: "ECSServiceAverageCPUUtilization"
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        TargetValue: 75
+
+  tysapigatewayservicescalingtarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn: tysapigatewayservice
+    Properties:
+      MaxCapacity: !Ref ContainerMaxCapacity
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ECSCluster}/${tysapigatewayservice.Name}"
+      RoleARN: !GetAtt AutoscalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs                                             
+
+
+  ECSServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: ecs-service-use1
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+                  - 'elasticloadbalancing:DeregisterTargets'
+                  - 'elasticloadbalancing:Describe*'
+                  - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+                  - 'elasticloadbalancing:RegisterTargets'
+                  - 'ec2:Describe*'
+                  - 'ec2:AuthorizeSecurityGroupIngress'
+                  - 'ecs:ListTasks'
+                  - 'ecs:Describe*'
+                Resource: '*'
+
+
+  EC2Role:
+  Type: AWS::IAM::Role
+  Properties:
+    AssumeRolePolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              - ec2.amazonaws.com
+          Action:
+            - sts:AssumeRole
+    Path: /
+    ManagedPolicyArns:
+      - !Ref ec2ManagedPolicy
+
+  ec2ManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    DependsOn: CompanyAssetBucket
+    Properties:
+      ManagedPolicyName: ecs-api-policy
+      Path: /service-role/
+      PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ECS
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:DeregisterInstancesFromLoadBalancer
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:Describe*
+                  - elasticloadbalancing:RegisterInstancesWithLoadBalancer
+                  - elasticloadbalancing:RegisterTargets
+                  - ec2:Describe*
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ecs:ListTasks
+                  - ecs:CreateCluster
+                  - ecs:DeregisterContainerInstance
+                  - ecs:DiscoverPollEndpoint
+                  - ecs:Poll
+                  - ecs:RegisterContainerInstance
+                  - ecs:StartTelemetrySession
+                  - ecs:Submit*
+                  - ecs:Describe*
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: "*"
+
+              - Sid: MediaConvertAccess
+                Effect: Allow
+                Action:
+                  - mediaconvert:DescribeEndpoints
+                  - mediaconvert:ListJobs
+                  - mediaconvert:GetJob
+                Resource: "*"
+
+              - Sid: DynamoDB
+                Effect: Allow
+                Action:
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                  - dynamodb:UpdateTable
+                  - dynamodb:ListTables
+                  - dynamodb:GetRecords
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}"
+
+              - Sid: EventBridgeActions
+                Effect: Allow
+                Action:
+                  - events:*
+                  - schemas:*
+                  - scheduler:*
+                  - pipes:*
+                Resource: "*"
+
+              - Sid: SNS
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                  - sns:CreatePlatformEndpoint
+                Resource:
+                  - !Ref SNSApnsArn
+                  - !Ref SNSGcmArn
+
+              - Sid: ParameterStore
+                Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                  - ssm:GetParameters
+                Resource: "*"
+
+              - Sid: CompanyAssetsS3
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectTagging
+                  - s3:PutObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:ListMultipartUploadParts
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectTorrent
+                  - s3:PutObjectRetention
+                  - s3:GetObjectVersionForReplication
+                  - s3:ReplicateDelete
+                  - s3:PutObjectAcl
+                  - s3:PutObjectVersionAcl
+                  - s3:GetObjectVersion
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${CompanyAssetsBucket}"
+                  - !Sub "arn:aws:s3:::${CompanyAssetsBucket}/*"
+
+              - Sid: Impress
+                Effect: Allow
+                Action:
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectTagging
+                  - s3:ListMultipartUploadParts
+                  - s3:GetObject
+                  - s3:GetObjectVersionForReplication
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${ImpressBucket}"
+                  - !Sub "arn:aws:s3:::${ImpressBucket}/*"
+
+  AutoscalingRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - application-autoscaling.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: service-autoscaling-use1
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'application-autoscaling:*'
+                  - 'cloudwatch:DescribeAlarms'
+                  - 'cloudwatch:PutMetricAlarm'
+                  - 'ecs:DescribeServices'
+                  - 'ecs:UpdateService'
+                Resource: '*'
+
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref EC2Role
+
+
+  ssiroute53recordset:
+    DependsOn: SSIALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref ssiapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  feedsroute53recordset:
+    DependsOn: FeedsALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref feedsapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  courseengineroute53recordset:
+    DependsOn: courseengineALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref courseengineapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  courseenginev2route53recordset:
+    DependsOn: courseenginev2ALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref courseenginev2apiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  capsuleengineroute53recordset:
+    DependsOn: capsuleengineALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref capsuleengineapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  importuserroute53recordset:
+    DependsOn: tysimportuserALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysimportuserapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  userroute53recordset:
+    DependsOn: tysuserALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysuserapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  productroute53recordset:
+    DependsOn: tysproductALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysproductapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  channelroute53recordset:
+    DependsOn: tyschannelALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tyschannelapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  coursetrackroute53recordset:
+    DependsOn: tyscoursetrackALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tyscoursetrackapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  coursetrackcomroute53recordset:
+    DependsOn: tyscoursetrackcomALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tyscoursetrackcomapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  habitcardroute53recordset:
+    DependsOn: tyshabitcardALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tyshabitcardapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid
+
+  emailroute53recordset:
+    DependsOn: tysemailALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysemailapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid   
+
+  trialsignuproute53recordset:
+    DependsOn: tystrialsignupALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tystrialsignupapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid  
+
+  notificationroute53recordset:
+    DependsOn: tysnotificationALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysnotificationapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid  
+
+  inappnotificationroute53recordset:
+    DependsOn: tysinappnotificationALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysinappnotificationapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid  
+
+  crs3route53recordset:
+    DependsOn: tyscrs3ALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tyscrs3apiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid  
+
+  surveyroute53recordset:
+    DependsOn: tyssurveyALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tyssurveyapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid        
+
+  trainingroute53recordset:
+    DependsOn: tystrainingALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tystrainingapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid   
+
+  apigatewayroute53recordset:
+    DependsOn: tysapigatewayALBListenerRule
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      Name: !Ref tysapigatewayapiurl
+      Type: "A"
+      AliasTarget:
+        HostedZoneId: !GetAtt ECSALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ECSALB.DNSName
+        EvaluateTargetHealth: true
+      HostedZoneId: !Ref route53zoneid                   
+
+Outputs:
+  EcsCluster:
+    Description: ECS cluster name
+    Value: !Ref ECSCluster
+  EcsClusterlog:
+    Description: ECS cluster log group name
+    Value: !Sub ECS-${ECSCluster}
+  Autoscaling:
+    Description: EC2 autoscaling group name
+    Value: !Ref ECSAutoScalingGroup
+  LaunchConfiguration:
+    Description: EC2 Launch Configuration group id
+    Value: !Ref ContainerInstances
+  ALB:
+    Description: Application loadbalancer dns
+    Value: !GetAtt ECSALB.DNSName

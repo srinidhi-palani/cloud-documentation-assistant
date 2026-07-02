@@ -1,0 +1,2663 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Template that creates react for ssireact, crs2.0, crs1.0, capsule, auth, public channel with s3, cloudfront, codebuild and route53. Note: before running this execute the websocket template'
+Parameters:
+  CDNCertificateArn:
+    Description: Certificate ARN
+    Type: String
+    Default: null
+
+  s3mobileappbucket:
+    Description: Provide the s3 bucket name of mobile app config file
+    Type: String
+    Default: null
+
+  s3mobileappurl:
+    Description: Provide the s3 url path of mobile app config file
+    Type: String
+    Default: null
+
+  CDNHostedZoneId:
+    Description: Enter the cloudfront hosted zone id
+    Type: String
+    Default: null
+
+  codestarconnectionarn:
+    Description: Codestar connection arn
+    Type: String
+    Default: null
+
+  securityheaderlambdaarn:
+    Description: Security header lambda arn
+    Type: String
+    Default: null
+
+  FEEDSAPI:
+    Description: feeds course api url
+    Type: String
+    Default: null
+
+  SSIAPI:
+    Description: ssi course api url
+    Type: String
+    Default: null
+
+  CourseEngAPI:
+    Description: course engine api url
+    Type: String
+    Default: null
+
+  CapsuleAPI:
+    Description: capsule api url
+    Type: String
+    Default: null
+
+  CrsEngV2API:
+    Description: course engine v2 api url
+    Type: String
+    Default: null
+
+  channelapiurl:
+    Description: channel api url
+    Type: String
+    Default: null
+
+  importuserapiurl:
+    Description: import user api url
+    Type: String
+    Default: null
+
+  notificationserviceurl: 
+    Description: notification service api url
+    Type: String
+    Default: null
+
+  HostedZoneName:
+    Description: Please enter the domain name.
+    Type: String
+    Default: null
+
+  SSIGithubRepo:
+    Type: String
+    Default: null
+    Description: SSI github repo
+
+  CapsuleGithubRepo:
+    Type: String
+    Default: null
+    Description: Capsule github repo
+
+  CrsEngGithubRepo:
+    Type: String
+    Default: null
+    Description: Crs1.0 github repo
+
+  CrsEngV2GithubRepo:
+    Type: String
+    Default: null
+    Description: Crs2.0 github repo
+
+  SSNOWGithubRepo:
+    Type: String
+    Default: null
+    Description: SSNOW github repo
+
+  feedGithubRepo:
+    Type: String
+    Default: null
+    Description: Feed github repo
+
+  impressGithubRepo:
+    Type: String
+    Default: null
+    Description: Impress github repo
+
+  reportGithubRepo:
+    Type: String
+    Default: null
+    Description: Report github repo
+
+  channelfeedGithubRepo:
+    Type: String
+    Default: null
+    Description: Channel feed github repo
+
+  AuthGithubRepo:
+    Type: String
+    Default: null
+    Description: Auth github repo
+
+  PubchGithubRepo:
+    Type: String
+    Default: null
+    Description: Public channel github repo
+
+  SSIReactBucket:
+    Type: String 
+    Default: null
+    Description: "SSI bucket name"
+
+  CapsuleEngReactBucket:
+    Type: String 
+    Default: null
+    Description: "Capsule bucket name"
+
+  CrsEngReactBucket:
+    Type: String 
+    Default: null
+    Description: "Crs1.0 bucket name"
+
+  CrsEngV2ReactBucket:
+    Type: String 
+    Default: null
+    Description: "Crs2.0 bucket name"
+
+  SSNOWReactBucket:
+    Type: String 
+    Default: null
+    Description: "SSNOW bucket name"
+
+  feedReactBucket:
+    Type: String 
+    Default: null
+    Description: "Feed bucket name"
+
+  impressReactBucket:
+    Type: String 
+    Default: null
+    Description: "Impress bucket name"
+
+  reportReactBucket:
+    Type: String 
+    Default: null
+    Description: "Report bucket name"
+
+  channelfeedReactBucket:
+    Type: String 
+    Default: null
+    Description: "Channel feed bucket name"
+
+  authReactBucket: 
+    Type: String
+    Default: null
+    Description: "Authentication bucket name"
+
+  PubchReactBucket:
+    Type: String
+    Default: null
+    Description: "Public channel bucket name"
+
+  SSIWebsiteName:
+    Type: String 
+    Default: null
+    Description: SSI Website name
+
+  CapsuleEngWebsiteName:
+    Type: String 
+    Default: null
+    Description: Capsule Website name
+
+  CrsEngWebsiteName:
+    Type: String 
+    Default: null
+    Description: Crs1.0 Website name
+
+  CrsEngV2WebsiteName:
+    Type: String 
+    Default: null
+    Description: Crs2.0 Website name
+
+  SSNOWWebsiteName:
+    Type: String 
+    Default: null
+    Description: SSNOW Website name
+
+  impressWebsiteName:
+    Type: String 
+    Default: null
+    Description: Impress Website name
+
+  reportWebsiteName:
+    Type: String 
+    Default: null
+    Description: Report Website name
+
+  channelfeedWebsiteName:
+    Type: String 
+    Default: null
+    Description: Channel Website name
+
+  feedWebsiteName:
+    Type: String 
+    Default: null
+    Description: Feeds Website name
+
+  AuthWebsiteName:
+    Type: String 
+    Default: null
+    Description: authentication Website name
+
+  PubchWebsiteName:
+    Type: String 
+    Default: null
+    Description: Public channel Website name
+
+  contentassetbkturl:
+    Type: String 
+    Default: null
+    Description: "Enter the content asset bucket url"
+
+  appassetbkturl: 
+    Type: String
+    Default: null
+    Description: "Enter the appasset url"
+
+  CrsEngV1Translation:
+    Type: String 
+    Default: null
+    Description: "Enter the courseengine 1.0 translation folder url"
+
+  CrsEngV2Translation:
+    Type: String 
+    Default: null
+    Description: "Enter the courseengine 2.0 translation folder url"
+
+  CapEngTranslation:
+    Type: String 
+    Default: null
+
+  ssitranslation:
+    Type: String 
+    Default: null
+    Description: Web translation path
+
+  Pubchtranslationpath:
+    Description: Public channel translation path
+    Type: String
+    Default: null
+
+  googleplatform:
+    Description: Google platform api
+    Type: String
+    Default: null
+
+  ssireactapikey:
+    Type: String 
+    Default: null
+
+  ssireactdocsviewer:
+    Type: String 
+    Default: null
+
+  SSIReactAppName:
+    Description: Name of ssi codebuild react app
+    Type: String
+    Default: null
+
+  CapsuleReactAppName:
+    Description: Name of capsule codebuild react app
+    Type: String
+    Default: null
+
+  CrsEngReactAppName:
+    Description: Name of crs1.0 codebuild react app
+    Type: String
+    Default: null
+
+  CrsEngV2ReactAppName:
+    Description: Name of crs2.0 codebuild react app
+    Type: String
+    Default: null
+
+  SSNOWReactAppName:
+    Description: Name of ssnow codebuild react app
+    Type: String
+    Default: null
+
+  feedReactAppName:
+    Description: Name of feed codebuild react app
+    Type: String
+    Default: null
+
+  impressReactAppName:
+    Description: Name of impress codebuild react app
+    Type: String
+    Default: null
+
+  reportReactAppName:
+    Description: Name of report codebuild react app
+    Type: String
+    Default: null
+
+  channelfeedReactAppName:
+    Description: Name of channel feed codebuild react app
+    Type: String
+    Default: null
+
+  AuthReactAppName:
+    Description: Name of auth codebuild react app
+    Type: String
+    Default: null
+
+  PubchReactAppName:
+    Description: Name of publicchannel codebuild react app
+    Type: String
+    Default: null
+
+  CodebuildDockerImage:
+    Description: ECR repository name
+    Type: String
+    Default: null
+
+  releasedate:
+    Description: Release date for the release notes
+    Type: String
+    Default: null
+
+  companybucketurl:
+    Description: Enter the company logo cloudfront url
+    Type: String
+    Default: null
+
+  remaindernotificationurl:
+    Description: Enter the remainder notification url
+    Type: String
+    Default: null
+
+  APIGATEWAY:
+    Description: api gateway api url
+    Type: String
+    Default: null
+
+  CodeBuildrolename:
+    Description: Codebuild role name
+    Type: String
+    Default: null
+
+  cdnpolicy:
+    Description: Enter the custom cdn policy name
+    Type: String
+    Default: null
+
+  companyname: 
+    AllowedValues:
+      - "SafeStart"
+      - "Accutrain"
+    Default: null
+    Description: "Choose the company name"
+    Type: String
+Mappings: 
+  CompanyName:
+    SafeStart:
+      companytitle: "YOUFactors"
+      companylogo: "youfactors-logo.png"
+      publicchannel: "YOUFactors Creator"
+      companyfavicon: "TitleLogo192.png"
+      releaseskey: '{ "en-US":"09894d1c-1e28-404b-a4a3-c0c25af112e5", "da-DK":"f1b14c01-4dfb-41db-a903-9b1be2abf2ee", "es-MX":"7a1ed4d3-2fa4-47a3-89e1-544adddaf9e0", "de-DE":"9a052073-3062-4adf-912e-c86bcacf6f21", "fr-FR":"cc58d73f-9c36-4fee-a948-d35ef0e526f2", "pt-BR":"20d83187-3ec5-42db-b99b-631b89c26604" }'
+      supporturl: "https://support.youfactors.com/portal/"
+      iosappurl: "https://apps.apple.com/in/app/youfactors/id1530362922"
+      androidappurl: "https://play.google.com/store/apps/details?id=com.YouFactors"
+    Accutrain:  
+      companytitle: "AccuEd Connect"
+      companylogo: "AccuEdConnect_logo.png"
+      companyfavicon: "AccuEdConnectFavicon.png"
+      releaseskey: '{ "en-US": { "key": "810ee608-287a-4f39-a811-86b8f099eef2", "active":0}, "da-DK": { "key": "810ee608-287a-4f39-a811-86b8f099eef2", "active":0}, "es-MX": { "key": "810ee608-287a-4f39-a811-86b8f099eef2", "active":0}, "de-DE": { "key": "810ee608-287a-4f39-a811-86b8f099eef2", "active":0}, "fr-FR": { "key": "810ee608-287a-4f39-a811-86b8f099eef2", "active":0}, "pt-BR": { "key": "810ee608-287a-4f39-a811-86b8f099eef2", "active":0} }'
+      supporturl: "https://support.youfactors.com/portal/"
+      iosappurl: "https://apps.apple.com/in/app/youfactors/id1530362922"
+      androidappurl: "https://play.google.com/store/apps/details?id=com.YouFactors"
+Resources:
+  CDNCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Ref cdnpolicy
+        Comment: "Custom cache policy for improved performance"
+        DefaultTTL: 43200
+        MaxTTL: 86400
+        MinTTL: 43200
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+
+  SSIWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref SSIReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+
+  SSIReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: SSIWebsiteBucket
+    Properties:
+      Bucket: !Ref SSIReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${SSIWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${SSIWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  CrsEngWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref CrsEngReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+
+  CrsEngReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: CrsEngWebsiteBucket
+    Properties:
+      Bucket: !Ref CrsEngWebsiteBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${CrsEngWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${CrsEngWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  CrsEngV2WebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref CrsEngV2ReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      LifecycleConfiguration:
+        Rules:
+          - Id: Retainobjectversion
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NewerNoncurrentVersions: 3
+              NoncurrentDays: 15
+            ObjectSizeGreaterThan: 1 #bytes
+          - Id: Expiredeletemarker
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+        # ErrorDocument: '404.html'
+
+  CrsEngV2ReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: CrsEngV2WebsiteBucket
+    Properties:
+      Bucket: !Ref CrsEngV2WebsiteBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${CrsEngV2WebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${CrsEngV2WebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+      
+  CapsuleEngWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref CapsuleEngReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      LifecycleConfiguration:
+        Rules:
+          - Id: Retainobjectversion
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NewerNoncurrentVersions: 3
+              NoncurrentDays: 15
+            ObjectSizeGreaterThan: 1 #bytes
+          - Id: Expiredeletemarker
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+        # ErrorDocument: '404.html'
+
+  CapsuleEngV2ReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: CapsuleEngWebsiteBucket
+    Properties:
+      Bucket: !Ref CapsuleEngWebsiteBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${CapsuleEngWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${CapsuleEngWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  SSNOWWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref SSNOWReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  SSNOWReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: SSNOWWebsiteBucket
+    Properties:
+      Bucket: !Ref SSNOWReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${SSNOWWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${SSNOWWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  feedWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref feedReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - POST
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  feedReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: feedWebsiteBucket
+    Properties:
+      Bucket: !Ref feedReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${feedWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${feedWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  reportWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref reportReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - POST
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  reportReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: reportWebsiteBucket
+    Properties:
+      Bucket: !Ref reportReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${reportWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${reportWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+  
+  impressWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref impressReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - POST
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  impressReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: impressWebsiteBucket
+    Properties:
+      Bucket: !Ref impressReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${impressWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${impressWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  channelfeedWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref channelfeedReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - POST
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  channelfeedReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: channelfeedWebsiteBucket
+    Properties:
+      Bucket: !Ref channelfeedReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${channelfeedWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${channelfeedWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  AuthWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref authReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - POST
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  AuthReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: AuthWebsiteBucket
+    Properties:
+      Bucket: !Ref authReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${AuthWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${AuthWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  PubchWebsiteBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref PubchReactBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: ObjectWriter
+      WebsiteConfiguration:
+        IndexDocument: 'index.html'
+      LifecycleConfiguration:
+        Rules:
+          - Id: 'RetainObjectVersions'
+            Status: Enabled
+            Prefix: ""                # Apply to all objects (customize if needed)
+            ObjectSizeGreaterThan: 1  # Minimum object size: 1 byte
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 15
+              NewerNoncurrentVersions: 3
+          - Id: 'ExpireDeleteMarkers'
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+              - POST
+            AllowedOrigins:
+              - "*"
+            ExposedHeaders: []
+            MaxAge: 3000
+
+  PubchReactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: PubchWebsiteBucket
+    Properties:
+      Bucket: !Ref PubchReactBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Deny
+            Action:
+              - 's3:*'
+            Resource:
+              - !Sub 'arn:aws:s3:::${PubchWebsiteBucket}'
+              - !Sub 'arn:aws:s3:::${PubchWebsiteBucket}/*'
+            Principal: '*'
+            Condition: 
+              Bool:
+                'aws:SecureTransport': false
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    DependsOn: CodeBuildpolicy
+    Properties:
+      RoleName: !Sub ${CodeBuildrolename}-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref CodeBuildpolicy
+
+  CodeBuildpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${CodeBuildrolename}-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+              - codestar-connections:GetConnectionToken 
+              - codestar-connections:GetConnection
+              - codeconnections:UseConnection
+              - codeconnections:GetConnection
+              - codeconnections:GetConnectionToken
+            Resource:
+              - !Sub ${codestarconnectionarn}
+          - Effect: Allow
+            Action: 
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketAcl"
+              - "s3:GetObjectAcl"
+              - "s3:GetObjectVersionAcl"
+              - "s3:ListBucket"
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:PutObjectAcl"
+              - "s3:GetBucketLocation"
+              - "s3:GetBucketVersioning"  
+            Resource:
+              - !Sub arn:aws:s3:::${SSIWebsiteBucket}
+              - !Sub arn:aws:s3:::${SSIWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${CrsEngWebsiteBucket}
+              - !Sub arn:aws:s3:::${CrsEngWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${CapsuleEngWebsiteBucket}
+              - !Sub arn:aws:s3:::${CapsuleEngWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${CrsEngV2WebsiteBucket}
+              - !Sub arn:aws:s3:::${CrsEngV2WebsiteBucket}/*
+              - !Sub arn:aws:s3:::${SSNOWWebsiteBucket}
+              - !Sub arn:aws:s3:::${SSNOWWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${feedWebsiteBucket}
+              - !Sub arn:aws:s3:::${feedWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${impressWebsiteBucket}
+              - !Sub arn:aws:s3:::${impressWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${reportWebsiteBucket}
+              - !Sub arn:aws:s3:::${reportWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${channelfeedWebsiteBucket}
+              - !Sub arn:aws:s3:::${channelfeedWebsiteBucket}/*
+              - !Sub arn:aws:s3:::${authReactBucket}
+              - !Sub arn:aws:s3:::${authReactBucket}/*
+              - !Sub arn:aws:s3:::${PubchReactBucket}
+              - !Sub arn:aws:s3:::${PubchReactBucket}/*
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketAcl"
+            Resource:
+            - !Sub arn:aws:s3:::${s3mobileappbucket}
+            - !Sub arn:aws:s3:::${s3mobileappbucket}/*
+          - Effect: Allow
+            Action:
+            - ecr:ListImages
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - ecr:GetAuthorizationToken
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - ecr:BatchCheckLayerAvailability
+            - ecr:GetDownloadUrlForLayer
+            - ecr:GetRepositoryPolicy
+            - ecr:DescribeRepositories
+            - ecr:ListImages
+            - ecr:DescribeImages
+            - ecr:BatchGetImage
+            - ecr:PutImage
+            - cloudfront:CreateInvalidation
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents" 
+            Resource: 
+              - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*
+  
+  SSICloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - SSIWebsiteBucket
+      - SSIReactBucketPolicy
+      - CDNCachePolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref SSIWebsiteName
+        Origins:
+          - DomainName: !GetAtt SSIWebsiteBucket.RegionalDomainName
+            Id: !Ref SSIWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref SSIWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  CapsuleEngCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - CapsuleEngWebsiteBucket
+      - CapsuleEngV2ReactBucketPolicy
+      - CDNCachePolicy
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref CapsuleEngWebsiteName
+        Origins:
+          - DomainName: !GetAtt CapsuleEngWebsiteBucket.RegionalDomainName
+            Id: !Ref CapsuleEngWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn: !Ref CDNCertificateArn
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:     
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref CapsuleEngWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  CrsEngCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - CrsEngWebsiteBucket
+      - CrsEngReactBucketPolicy
+      - CDNCachePolicy
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref CrsEngWebsiteName
+        Origins:
+          - DomainName: !GetAtt CrsEngWebsiteBucket.RegionalDomainName
+            Id: !Ref CrsEngWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn: !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref CrsEngWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  CrsEngV2CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - CrsEngV2WebsiteBucket
+      - CrsEngV2ReactBucketPolicy
+      - CDNCachePolicy
+    Properties:
+      DistributionConfig:
+        Aliases:
+          - !Ref CrsEngV2WebsiteName
+        Origins:
+          - DomainName: !GetAtt CrsEngV2WebsiteBucket.RegionalDomainName
+            Id: !Ref CrsEngV2WebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:     
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref CrsEngV2WebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  SSNOWCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - SSNOWWebsiteBucket
+      - SSNOWReactBucketPolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref SSNOWWebsiteName
+        Origins:
+          - DomainName: !GetAtt SSNOWWebsiteBucket.RegionalDomainName
+            Id: !Ref SSNOWWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref SSNOWWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  feedCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - feedWebsiteBucket
+      - feedReactBucketPolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref feedWebsiteName
+        Origins:
+          - DomainName: !GetAtt feedWebsiteBucket.RegionalDomainName
+            Id: !Ref feedWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref feedWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  impressCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - impressWebsiteBucket
+      - impressReactBucketPolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref impressWebsiteName
+        Origins:
+          - DomainName: !GetAtt impressWebsiteBucket.RegionalDomainName
+            Id: !Ref impressWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref impressWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  reportCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - reportWebsiteBucket
+      - reportReactBucketPolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref reportWebsiteName
+        Origins:
+          - DomainName: !GetAtt reportWebsiteBucket.RegionalDomainName
+            Id: !Ref reportWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref reportWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  channelfeedCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - channelfeedWebsiteBucket
+      - channelfeedReactBucketPolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref channelfeedWebsiteName
+        Origins:
+          - DomainName: !GetAtt channelfeedWebsiteBucket.RegionalDomainName
+            Id: !Ref channelfeedWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref channelfeedWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  AuthCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - AuthWebsiteBucket
+      - AuthReactBucketPolicy
+      - CDNCachePolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref AuthWebsiteName
+        Origins:
+          - DomainName: !GetAtt AuthWebsiteBucket.RegionalDomainName
+            Id: !Ref AuthWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref AuthWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  PubchCloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: 
+      - PubchWebsiteBucket
+      - PubchReactBucketPolicy
+      - CDNCachePolicy
+    Properties:
+      DistributionConfig:  
+        Aliases:
+          - !Ref PubchWebsiteName
+        Origins:
+          - DomainName: !GetAtt PubchWebsiteBucket.RegionalDomainName
+            Id: !Ref PubchWebsiteBucket
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        ViewerCertificate:
+          SslSupportMethod: sni-only
+          AcmCertificateArn:  !Ref CDNCertificateArn # !Ref CertificateManagerCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+        CustomErrorResponses:
+          - ErrorCachingMinTTL: 60
+            ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html 
+        DefaultRootObject: index.html
+        Enabled: true
+        DefaultCacheBehavior:
+          LambdaFunctionAssociations:
+           - EventType: origin-response
+             LambdaFunctionARN: !Ref securityheaderlambdaarn
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: 'true'
+          CachePolicyId: !Ref CDNCachePolicy
+          ForwardedValues: 
+            QueryString: false
+          TargetOriginId: !Ref PubchWebsiteBucket
+          ViewerProtocolPolicy: "redirect-to-https"
+        HttpVersion: http2
+        IPV6Enabled: true
+
+  ssiLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${SSIReactAppName}'
+      RetentionInDays: 60
+
+  SSICodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref SSIReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref ssiLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: SKIP_PREFLIGHT_CHECK  
+            Value: true
+          - Name: VITE_APIURL 
+            Value: !Ref SSIAPI
+          - Name: VITE_COURSEENGINE_URL
+            Value: !Sub "https://${CrsEngWebsiteName}/"
+          - Name: VITE_FEEDAPI_URL
+            Value: !Ref FEEDSAPI
+          - Name: VITE_DOCS_VIEWER_URL
+            Value: !Ref ssireactdocsviewer
+          - Name: VITE_RESOURCES_URL
+            Value: !Ref appassetbkturl
+          - Name: VITE_STREAMAPP_APIKEY
+            Value: !Ref ssireactapikey
+          - Name: VITE_STREAMAPP_APPID
+            Value: 61720
+          - Name: VITE_UPDATECOMMENTS
+            Value: 0
+          - Name: VITE_ACTIVITY_ENABLED
+            Value: 0
+          - Name: INLINE_RUNTIME_CHUNK
+            Value: false
+          - Name: VITE_CAPSULEENGINE_URL
+            Value: !Sub "https://${CapsuleEngWebsiteName}/"
+          - Name: VITE_YOUFACTORS_TRANSLATION_URL
+            Value: !Ref ssitranslation
+          - Name: VITE_COURSEENGINE2_URL
+            Value: !Sub "https://$CrsEngV2WebsiteName/"
+          - Name: VITE_DCT_KEY
+            Value: A13578642B
+          - Name: VITE_CRSENGINE2_IMAGEURL
+            Value: !Ref contentassetbkturl
+          - Name: VITE_IMPORTUSERS_APIURL
+            Value: !Ref importuserapiurl  ##
+          - Name: VITE_MAIN_TITLE
+            Value: !FindInMap [CompanyName, !Ref companyname, companytitle]
+          - Name: VITE_LOGO
+            Value: !FindInMap [CompanyName, !Ref companyname, companylogo]
+          - Name: VITE_ICON
+            Value: !FindInMap [CompanyName, !Ref companyname, companyfavicon]
+          - Name: VITE_CHANNELAPI_URL
+            Value: !Ref channelapiurl
+          - Name: VITE_SUPPORT_URL
+            Value: !FindInMap [CompanyName, !Ref companyname, supporturl]
+          - Name: VITE_IOS_APP_URL
+            Value: !FindInMap [CompanyName, !Ref companyname, iosappurl]
+          - Name: VITE_ANDROID_APP_URL
+            Value: !FindInMap [CompanyName, !Ref companyname, androidappurl]
+          - Name: VITE_SSO_GOOGLE_SIGNON_ID
+            Value: "865321694165-le7t500vvsjc6pgvgg4ldtk4m6g5jmp0"
+          - Name: VITE_YOUTHLIGHT_URL
+            Value: "https://d3680ivob2apxp.cloudfront.net/"
+          - Name: VITE_RELEASE_KEY
+            Value: 09894d1c-1e28-404b-a4a3-c0c25af112e5
+          - Name: VITE_RELEASE_URL
+            Value: "https://widget.releasesapp.com/js/v1.js"
+          - Name: VITE_DISPLAY_DAYS
+            Value: "3"
+          - Name: VITE_RELEASE_DATE
+            Value: !Ref releasedate
+          - Name: VITE_RELEASE_SHOW
+            Value: 1
+          - Name: VITE_NOTIFICATIONSERVICE_URL
+            Value: !Ref notificationserviceurl
+          - Name: VITE_GOOGLE_SIGNON_USER_INFO
+            Value: "https://www.googleapis.com/oauth2/v3/userinfo"
+          - Name: VITE_FEEDBACK_DISABLE_DATE
+            Value: "19/10/2024"
+          - Name: VITE_RELEASES_SAFESTART
+            Value: !FindInMap [CompanyName, !Ref companyname, releaseskey]
+          - Name: VITE_LOGOURL
+            Value: !Ref companybucketurl
+          - Name: VITE_REMINDERNOTIFY_URL
+            Value: !Ref remaindernotificationurl
+          - Name: VITE_DOWNLOAD_URL
+            Value: "downloadredirect?utm_source=youfactors.com&utm_medium=website&utm_campaign=website_app&&utm_term=test_term&&utm_content=test_content"
+          - Name: VITE_COMMON_TRANSLATION_URL
+            Value: !Sub "${appassetbkturl}appasset/translations/"
+          - Name: VITE_API_GATEWAY
+            Value: !Ref APIGATEWAY
+          - Name: VITE_Domain_URL
+            Value: !Sub
+              - "https://${DomainName}"
+              - DomainName: !GetAtt SSICloudFrontDistribution.DomainName
+          - Name: VITE_SSNOW_REMOTE
+            Value: !Sub https://${SSNOWWebsiteName}
+          - Name: VITE_FEEDS_REMOTE
+            Value: !Sub https://${feedWebsiteName}
+          - Name: VITE_IMPRESS_REMOTE
+            Value: !Sub https://${impressWebsiteName}
+          - Name: VITE_REPORTS_REMOTE
+            Value: !Sub https://${reportWebsiteName}
+          - Name: VITE_CHANNEL_FEEDS_REMOTE
+            Value: !Sub https://${channelfeedWebsiteName}
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref SSIGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${SSIWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID": ${SSICloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://$S3_BUCKET --recursive 
+                - aws s3 cp build s3://$S3_BUCKET/ --acl public-read --recursive
+                - aws s3 cp ${s3mobileappurl} s3://$S3_BUCKET --acl public-read 
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'                
+                - echo Build completed on `date`
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes        
+
+  CapsuleLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${CapsuleReactAppName}'
+      RetentionInDays: 60
+  
+  CapsuleCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref CapsuleReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref CapsuleLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: SKIP_PREFLIGHT_CHECK  
+            Value: true
+          - Name: REACT_APP_APIURL 
+            Value: !Ref CapsuleAPI
+          - Name: REACT_APP_CRSENGINE_IMAGEURL
+            Value: !Ref appassetbkturl
+          - Name: REACT_APP_CRSENGINE_TRANSLATION_URL
+            Value: !Ref CapEngTranslation
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref CapsuleGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${CapsuleEngWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${CapsuleEngCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${CapsuleEngWebsiteBucket} --recursive 
+                - aws s3 cp build s3://${CapsuleEngWebsiteBucket}/ --acl public-read --recursive 
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes        
+
+  CrsLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${CrsEngReactAppName}'
+      RetentionInDays: 60
+
+  CrsEngCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref CrsEngReactAppName # !Sub ${AWS::StackName}-CodeBuild
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref CrsLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: SKIP_PREFLIGHT_CHECK  
+            Value: true
+          - Name: REACT_APP_APIURL 
+            Value: !Ref CourseEngAPI
+          - Name: REACT_APP_CRSENGINE_IMAGEURL
+            Value: !Ref appassetbkturl
+          - Name: REACT_APP_CRSENGINE_TRANSLATION_URL
+            Value: !Ref CrsEngV1Translation
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+#          Resource: !Ref GithubOAuthToken
+        Location: !Ref CrsEngGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${CrsEngWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${CrsEngCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${CrsEngWebsiteBucket} --recursive 
+                - aws s3 cp build s3://${CrsEngWebsiteBucket}/ --acl public-read --recursive 
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'                
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes        
+
+  Crsv2LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${CrsEngV2ReactAppName}'
+      RetentionInDays: 60
+
+  CrsEngV2CodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref CrsEngV2ReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref Crsv2LogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: SKIP_PREFLIGHT_CHECK  
+            Value: true
+          - Name: REACT_APP_APIURL 
+            Value: !Ref CrsEngV2API
+          - Name: REACT_APP_CRSENGINE_IMAGEURL
+            Value: !Ref contentassetbkturl
+          - Name: REACT_APP_CRSENGINE_TRANSLATION_URL
+            Value: !Ref CrsEngV1Translation
+          - Name: REACT_APP_CRSENGINE2_TRANSLATION_URL
+            Value: !Ref CrsEngV2Translation
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+#          Resource: !Ref GithubOAuthToken
+        Location: !Ref CrsEngV2GithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${CrsEngV2WebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${CrsEngV2CloudFrontDistribution}           
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${CrsEngV2WebsiteBucket} --recursive 
+                - aws s3 cp build s3://${CrsEngV2WebsiteBucket}/ --acl public-read --recursive 
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'             
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  ssnowLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${SSNOWReactAppName}'
+      RetentionInDays: 60
+
+  SSNOWCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    DependsOn: SSNOWCloudFrontDistribution
+    Properties:
+      Name: !Ref SSNOWReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref ssnowLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: SKIP_PREFLIGHT_CHECK  
+            Value: true
+          - Name: VITE_APIURL 
+            Value: !Ref SSIAPI
+          - Name: VITE_COURSEENGINE_URL
+            Value: !Sub "https://${CrsEngWebsiteName}/"
+          - Name: VITE_FEEDAPI_URL
+            Value: !Ref FEEDSAPI
+          - Name: VITE_DOCS_VIEWER_URL
+            Value: !Ref ssireactdocsviewer
+          - Name: VITE_RESOURCES_URL
+            Value: !Ref appassetbkturl
+          - Name: VITE_STREAMAPP_APIKEY
+            Value: !Ref ssireactapikey
+          - Name: VITE_STREAMAPP_APPID
+            Value: 61720
+          - Name: VITE_UPDATECOMMENTS
+            Value: 0
+          - Name: VITE_ACTIVITY_ENABLED
+            Value: 0
+          - Name: INLINE_RUNTIME_CHUNK
+            Value: false
+          - Name: VITE_CAPSULEENGINE_URL
+            Value: !Sub "https://${CapsuleEngWebsiteName}/"
+          - Name: VITE_YOUFACTORS_TRANSLATION_URL
+            Value: !Ref ssitranslation
+          - Name: VITE_COURSEENGINE2_URL
+            Value: !Sub "https://${CrsEngV2WebsiteName}/"
+          - Name: VITE_DCT_KEY
+            Value: A13578642B
+          - Name: VITE_CRSENGINE2_IMAGEURL
+            Value: !Ref contentassetbkturl
+          - Name: VITE_IMPORTUSERS_APIURL
+            Value: !Ref importuserapiurl  ##
+          - Name: VITE_MAIN_TITLE
+            Value: !FindInMap [CompanyName, !Ref companyname, companytitle]
+          - Name: VITE_LOGO
+            Value: !FindInMap [CompanyName, !Ref companyname, companylogo]
+          - Name: VITE_ICON
+            Value: !FindInMap [CompanyName, !Ref companyname, companyfavicon]
+          - Name: VITE_CHANNELAPI_URL
+            Value: !Ref channelapiurl
+          - Name: VITE_SUPPORT_URL
+            Value: !FindInMap [CompanyName, !Ref companyname, supporturl]
+          - Name: VITE_IOS_APP_URL
+            Value: !FindInMap [CompanyName, !Ref companyname, iosappurl]
+          - Name: VITE_ANDROID_APP_URL
+            Value: !FindInMap [CompanyName, !Ref companyname, androidappurl]
+          - Name: VITE_SSO_GOOGLE_SIGNON_ID
+            Value: "865321694165-le7t500vvsjc6pgvgg4ldtk4m6g5jmp0"
+          - Name: VITE_YOUTHLIGHT_URL
+            Value: "https://d3680ivob2apxp.cloudfront.net/"
+          - Name: VITE_RELEASE_KEY
+            Value: 09894d1c-1e28-404b-a4a3-c0c25af112e5
+          - Name: VITE_RELEASE_URL
+            Value: "https://widget.releasesapp.com/js/v1.js"
+          - Name: VITE_DISPLAY_DAYS
+            Value: "3"
+          - Name: VITE_RELEASE_DATE
+            Value: !Ref releasedate
+          - Name: VITE_RELEASE_SHOW
+            Value: 1
+          - Name: VITE_NOTIFICATIONSERVICE_URL
+            Value: !Ref notificationserviceurl
+          - Name: VITE_GOOGLE_SIGNON_USER_INFO
+            Value: "https://www.googleapis.com/oauth2/v3/userinfo"
+          - Name: VITE_FEEDBACK_DISABLE_DATE
+            Value: "19/10/2024"
+          - Name: VITE_RELEASES_SAFESTART
+            Value: !FindInMap [CompanyName, !Ref companyname, releaseskey]
+          - Name: VITE_WEB_API_PORT_PUBLIC_CHANNEL
+            Value: !Ref APIGATEWAY
+          - Name: VITE_TRANSLATION_PATH_PUBLIC_CHANNEL
+            Value: !Ref Pubchtranslationpath
+          - Name: VITE_GOOGLE_PLATFORM_SCRIPT
+            Value: !Ref googleplatform
+          - Name: VITE_Domain_URL
+            Value: !Sub
+              - "https://${DomainName}"
+              - DomainName: !GetAtt SSICloudFrontDistribution.DomainName
+          - Name: VITE_LOGOURL
+            Value: !Ref companybucketurl
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+#          Resource: !Ref GithubOAuthToken
+          Type: OAUTH
+        Location: !Ref SSNOWGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${SSNOWWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${SSNOWCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${SSNOWWebsiteBucket} --recursive 
+                - aws s3 cp dist s3://${SSNOWWebsiteBucket}/ --acl public-read --recursive
+                - aws s3 cp ${s3mobileappurl} s3://${SSNOWWebsiteBucket} --acl public-read 
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  feedLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${feedReactAppName}'
+      RetentionInDays: 60
+
+  feedCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    DependsOn: feedCloudFrontDistribution
+    Properties:
+      Name: !Ref feedReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref feedLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: VITE_SSIAPIAPIURL 
+            Value: !Ref SSIAPI
+          - Name: VITE_UPLOAD_VIDEO_SIZE_LIMIT 
+            Value: 524288000
+          - Name: VITE_FEEDAPI_URL 
+            Value: !Ref FEEDSAPI
+          - Name: PORT
+            Value: 5002
+          - Name: VITE_Domain_URL
+            Value: !Sub
+              - "https://${DomainName}"
+              - DomainName: !GetAtt SSICloudFrontDistribution.DomainName
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+#          Resource: !Ref GithubOAuthToken
+          Type: OAUTH
+        Location: !Ref feedGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${feedWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${feedCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${feedWebsiteBucket} --recursive 
+                - aws s3 cp dist s3://${feedWebsiteBucket}/ --acl public-read --recursive
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  impressLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${impressReactAppName}'
+      RetentionInDays: 60
+
+  impressCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    DependsOn: impressCloudFrontDistribution
+    Properties:
+      Name: !Ref impressReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref impressLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: VITE_SSIAPIAPIURL 
+            Value: !Ref SSIAPI
+          - Name: VITE_UPLOAD_VIDEO_SIZE_LIMIT 
+            Value: 524288000
+          - Name: VITE_FEEDAPI_URL 
+            Value: !Ref FEEDSAPI
+          - Name: VITE_YOUFACTORS_TRANSLATION_URL 
+            Value: !Ref ssitranslation
+          - Name: VITE_RESOURCES_URL 
+            Value: !Ref appassetbkturl
+          - Name: VITE_Domain_URL
+            Value: !Sub
+              - "https://${DomainName}"
+              - DomainName: !GetAtt SSICloudFrontDistribution.DomainName
+          - Name: PORT
+            Value: 5003
+          - Name: VITE_DOCS_VIEWER_URL
+            Value: !Ref ssireactdocsviewer
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref impressGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${impressWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${impressCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${impressWebsiteBucket} --recursive 
+                - aws s3 cp dist s3://${impressWebsiteBucket}/ --acl public-read --recursive
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  reportLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${reportReactAppName}'
+      RetentionInDays: 60
+
+  reportCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    DependsOn: reportCloudFrontDistribution
+    Properties:
+      Name: !Ref reportReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref reportLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: VITE_SSIAPIAPIURL 
+            Value: !Ref SSIAPI
+          - Name: VITE_FEEDAPI_URL 
+            Value: !Ref FEEDSAPI
+          - Name: VITE_YOUFACTORS_TRANSLATION_URL 
+            Value: !Ref ssitranslation
+          - Name: VITE_Domain_URL
+            Value: !Sub
+              - "https://${DomainName}"
+              - DomainName: !GetAtt SSICloudFrontDistribution.DomainName
+          - Name: PORT
+            Value: 5004
+          - Name: VITE_API_GATEWAY
+            Value: !Ref APIGATEWAY
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref reportGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${reportWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${reportCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${reportWebsiteBucket} --recursive 
+                - aws s3 cp dist s3://${reportWebsiteBucket}/ --acl public-read --recursive
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  channelfeedLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${channelfeedReactAppName}'
+      RetentionInDays: 60
+
+  channelfeedCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    DependsOn: [ 'channelfeedCloudFrontDistribution', 'channelfeedLogGroup' ] 
+    Properties:
+      Name: !Ref channelfeedReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref channelfeedLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: VITE_SSIAPIAPIURL 
+            Value: !Ref SSIAPI
+          - Name: VITE_API_GATEWAY 
+            Value: !Ref APIGATEWAY
+          - Name: VITE_YOUFACTORS_TRANSLATION_URL 
+            Value: !Ref ssitranslation
+          - Name: VITE_TRANSLATION_PATH_PUBLIC_CHANNEL
+            Value: !Ref Pubchtranslationpath
+          - Name: VITE_Domain_URL
+            Value: !Sub
+              - "https://${DomainName}"
+              - DomainName: !GetAtt SSICloudFrontDistribution.DomainName
+          - Name: PORT
+            Value: 5005
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref channelfeedGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${channelfeedWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${channelfeedCloudFrontDistribution}
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${channelfeedWebsiteBucket} --recursive 
+                - aws s3 cp dist s3://${channelfeedWebsiteBucket}/ --acl public-read --recursive
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: dist
+            discard-paths: yes
+
+  AuthLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${AuthReactAppName}'
+      RetentionInDays: 60
+
+  AuthCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref AuthReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref AuthLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: REACT_APP_APIURL 
+            Value: !Ref SSIAPI
+          - Name: REACT_APP_RESOURCES_URL
+            Value: !Ref contentassetbkturl
+          - Name: REACT_APP_ICON
+            Value: !FindInMap [CompanyName, !Ref companyname, companyfavicon]
+          - Name: REACT_APP_MAIN_TITLE
+            Value: !FindInMap [CompanyName, !Ref companyname, companytitle]
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref AuthGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${AuthWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${AuthCloudFrontDistribution}           
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${AuthWebsiteBucket} --recursive 
+                - aws s3 cp build s3://${AuthWebsiteBucket}/ --acl public-read --recursive 
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'             
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  PubchLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/aws/codebuild/${PubchReactAppName}'
+      RetentionInDays: 60
+
+  PubchCodeBuild:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref PubchReactAppName
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: no_artifacts
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref PubchLogGroup
+      Environment:
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Type: LINUX_CONTAINER
+        ImagePullCredentialsType: SERVICE_ROLE
+        PrivilegedMode: true
+        Image: !Ref CodebuildDockerImage
+        EnvironmentVariables:
+          - Name: REACT_APP_TRANSLATION_PATH 
+            Value: !Ref Pubchtranslationpath
+          - Name: REACT_APP_ENV
+            Value: development
+          - Name: REACT_APP_IMAGE_PATH
+            Value: !Sub ${appassetbkturl}images
+          - Name: REACT_APP_APIGATEWAY_PORT
+            Value: !Ref APIGATEWAY
+          - Name: REACT_APP_MAIN_TITLE
+            Value: !FindInMap [CompanyName, !Ref companyname, publicchannel]
+          - Name: REACT_APP_WEBSOCKET_URL
+            Value: !ImportValue websocket
+      Triggers:
+        Webhook: false
+      TimeoutInMinutes: 10
+      Source:       
+        Auth:
+          Type: OAUTH
+        Location: !Ref PubchGithubRepo
+        Type: GITHUB     
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            variables:
+              S3_BUCKET: ${PubchWebsiteBucket}
+              BUILD_ENV: "prod"
+              DISTRIBUTION_ID: ${PubchCloudFrontDistribution}           
+          phases:
+            pre_build:
+              commands:
+                - echo Installing source NPM dependencies...
+                - npm install
+                #- npm audit --prod
+            build:
+              commands:
+                - echo Build started on `date`
+                - npm run build
+            post_build:
+              commands:
+                - aws s3 rm s3://${PubchWebsiteBucket} --recursive 
+                - aws s3 cp build s3://${PubchWebsiteBucket}/ --acl public-read --recursive 
+                - echo Build completed on `date`
+                - aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths '/*'             
+          artifacts:
+            files:
+              - '**/*'
+            base-directory: build
+            discard-paths: yes
+
+  ReactDNS:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneName: !Ref HostedZoneName
+      Comment: Zone apex alias targeted to myELB LoadBalancer.
+      RecordSets:
+      - Name: !Ref SSIWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt SSICloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref CapsuleEngWebsiteName 
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt CapsuleEngCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name:  !Ref CrsEngWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt CrsEngCloudFrontDistribution.DomainName  
+          EvaluateTargetHealth: false
+      - Name:  !Ref CrsEngV2WebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt CrsEngV2CloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref SSNOWWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt SSNOWCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref feedWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt feedCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref impressWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt impressCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref reportWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt reportCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref channelfeedWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt channelfeedCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref AuthWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt AuthCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+      - Name: !Ref PubchWebsiteName
+        Type: A
+        AliasTarget:
+          HostedZoneId: !Ref CDNHostedZoneId
+          DNSName: !GetAtt PubchCloudFrontDistribution.DomainName
+          EvaluateTargetHealth: false
+Outputs:
+  codebuildarn:
+    Description: React CodeBuildRole arn
+    Value: !GetAtt CodeBuildRole.Arn

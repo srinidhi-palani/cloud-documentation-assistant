@@ -1,0 +1,36 @@
+Template: feedsuploadbkt.yaml
+Category: S3 / CloudFront / CDN
+
+Purpose:
+This template creates two S3 buckets (feeds HLS and feeds upload) with CloudFront distributions using Origin Access Identity (OAI) for secure content delivery. It supports multiple environments with environment-specific bucket naming.
+
+AWS Services Used:
+- Amazon S3: Two buckets - feedshls (HLS video assets) and feedsupload (raw upload assets)
+- Amazon CloudFront: Two distributions with OAI for secure S3 access
+- AWS CloudFront OAI: Origin Access Identity for secure bucket access
+- AWS S3 Bucket Policy: Restricts access to CloudFront only
+
+Key Features:
+- Environment-based bucket naming (Dev/QA/UAT/Prod)
+- Origin Access Identity (OAI) for secure CloudFront-only access
+- S3 versioning enabled for asset history
+- S3 bucket encryption enabled
+- Configurable CORS for web application access
+- Configurable deletion policy (Retain/Delete)
+
+Environments and Bucket Names:
+- Dev: feedshlsassetsbucket-dev1, feedsuploadassetsbucket-dev1
+- QA: feedshlsassetsbucket-qa, feedsuploadassetsbucket-qa
+- UAT: feedshlsassetsbucket-uat-vapt, feedsuploadassetsbucket-uat-vapt
+- Prod: feedshlsassetsbucket-prod, feedsuploadassetsbucket-prod
+
+Parameters:
+- EnvironmentValue: Target environment (Dev/QA/UAT/Prod)
+- AllowedOrigins: CORS allowed origins
+- S3Deletionpolicy: Retain or Delete bucket on stack deletion
+
+Use Cases:
+- Store and serve HLS video streams for feeds
+- Upload and process raw media assets
+- Secure content delivery via CloudFront
+- Environment-specific content storage

@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation template that creates an S3 bucket for static website hosting
+  with a CloudFront distribution, bucket policy, and SSM parameters.
+
+Parameters:
+
+  PriceClass:
+    Type: String
+    Default: PriceClass_100
+    AllowedValues:
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
+    Description: CloudFront price class
+
+  DefaultTTL:
+    Type: Number
+    Default: 86400
+    Description: Default TTL for CloudFront cache in seconds
+
+  MinTTL:
+    Type: Number
+    Default: 0
+    Description: Minimum TTL for CloudFront cache in seconds
+
+  MaxTTL:
+    Type: Number
+    Default: 31536000
+    Description: Maximum TTL for CloudFront cache in seconds
+
+Resources:
+
+  # ----------------------------------------------------------
+  # S3 BUCKET
+  # ----------------------------------------------------------
+  StaticWebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ----------------------------------------------------------
+  # CLOUDFRONT ORIGIN ACCESS CONTROL
+  # ----------------------------------------------------------
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ----------------------------------------------------------
+  # S3 BUCKET POLICY — allow CloudFront OAC access
+  # ----------------------------------------------------------
+  StaticWebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StaticWebsiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontAccess
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${StaticWebsiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  # ----------------------------------------------------------
+  # CLOUDFRONT DISTRIBUTION
+  # ----------------------------------------------------------
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        PriceClass: !Ref PriceClass
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt StaticWebsiteBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          DefaultTTL: !Ref DefaultTTL
+          MinTTL: !Ref MinTTL
+          MaxTTL: !Ref MaxTTL
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+  # ----------------------------------------------------------
+  # SSM PARAMETERS
+  # ----------------------------------------------------------
+  BucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/s3/bucket/name"
+      Type: String
+      Value: !Ref StaticWebsiteBucket
+      Description: S3 bucket name
+
+  CloudFrontDomainParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/cloudfront/domain"
+      Type: String
+      Value: !GetAtt CloudFrontDistribution.DomainName
+      Description: CloudFront distribution domain name
+
+  CloudFrontIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/cloudfront/distribution-id"
+      Type: String
+      Value: !Ref CloudFrontDistribution
+      Description: CloudFront distribution ID
+
+Outputs:
+
+  CloudFrontDomain:
+    Description: CloudFront distribution domain name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  BucketName:
+    Description: S3 bucket name
+    Value: !Ref StaticWebsiteBucket

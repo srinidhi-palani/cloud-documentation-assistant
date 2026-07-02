@@ -1,0 +1,59 @@
+{
+  "OutputGroups": [
+    {
+      "Name": "Apple HLS",
+      "Outputs": [
+        {
+          "Preset": "HLS 1M",
+          "NameModifier": "_1000"
+        },
+        {
+          "Preset": "HLS 1.5M",
+          "NameModifier": "_1500"
+        },
+        {
+          "Preset": "HLS 600k",
+          "NameModifier": "_600"
+        }
+      ],
+      "OutputGroupSettings": {
+        "Type": "HLS_GROUP_SETTINGS",
+        "HlsGroupSettings": {
+          "SegmentLength": 10,
+          "Destination": "s3://infra-dev-aps1/sample-video/converted-1/all/",
+          "MinSegmentLength": 0
+        }
+      }
+    },
+    {
+      "Name": "Thumbnail",
+      "Outputs": [
+        {
+          "Preset": "HLS Thumbnails",              
+          "Extension": "png"
+        }
+      ],
+      "OutputGroupSettings": {
+        "Type": "FILE_GROUP_SETTINGS",
+        "FileGroupSettings": {
+          "Destination": "s3://infra-dev-aps1/sample-video/converted-1/all/thumb/"
+        }
+      }
+    }
+  ],
+  "FollowSource": 1,
+  "Inputs": [
+    {
+      "AudioSelectors": {
+        "Audio Selector 1": {
+          "DefaultSelection": "DEFAULT"
+        }
+      },
+      "VideoSelector": {
+       "Rotate": "AUTO"
+      },
+      "TimecodeSource": "ZEROBASED",
+      "FileInput": "s3://infra-dev-aps1/sample-video/raw/Parents_Bus_Script1.mp4"
+    }
+  ]
+}

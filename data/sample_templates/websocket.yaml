@@ -1,0 +1,443 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create an API Gateway WebSocket, Lambda function, and DynamoDB. NOTE: Ensure to add the wss url of web socket api gateway to Lambda env after the completion of the cfn template"
+Parameters:
+  websocketdyn:
+    Default: null
+    Description: Websocket dynamodb table name
+    Type: String
+  websocketLambda:
+    Default: null
+    Description: Websocket lambda name
+    Type: String
+  websocketapi:
+    Default: null
+    Description: Websocket api name
+    Type: String
+Resources:
+  DynamoDBTableDevactwebsocket:
+    Type: "AWS::DynamoDB::Table"
+    Properties:
+      SSESpecification:
+        SSEEnabled: false
+      ContributorInsightsSpecification:
+        Enabled: false
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+      ProvisionedThroughput:
+        WriteCapacityUnits: 5
+        ReadCapacityUnits: 5
+      WarmThroughput:
+        ReadUnitsPerSecond: 5
+        WriteUnitsPerSecond: 5
+      TableName: !Ref websocketdyn
+      AttributeDefinitions:
+      - AttributeType: "S"
+        AttributeName: "connectionId"
+      BillingMode: "PROVISIONED"
+      KeySchema:
+      - KeyType: "HASH"
+        AttributeName: "connectionId"
+      DeletionProtectionEnabled: true
+      TableClass: "STANDARD"
+      Tags: []
+      TimeToLiveSpecification:
+        Enabled: false
+
+  lambdapolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub LambdaDynamoDBAndWebSocketPolicy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:BatchGetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:BatchWriteItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${websocketdyn}"
+          - Effect: Allow
+            Action: execute-api:ManageConnections
+            Resource: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/*/@connections/*"
+          - Effect: Allow
+            Sid: "loggroupcreation"
+            Action:
+              - "logs:CreateLogGroup"
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Sid: "Createstream"
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents" 
+            Resource: 
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${websocketLambda}:*"
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    DependsOn: lambdapolicy
+    Properties:
+      RoleName: !Sub websocket-role-${AWS::Region}
+      Path: "/service-role/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref lambdapolicy
+
+  lambdaLogGroup1:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${websocketLambda}
+      RetentionInDays: 60
+
+  WebSocketLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref websocketLambda
+      Runtime: python3.13
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 128
+      Timeout: 300
+      Architectures:
+        - x86_64
+      Code:
+        ZipFile: !Sub |
+              import boto3
+              import os
+              import json
+              import uuid
+              
+              dynamodb = boto3.client("dynamodb")
+              TABLE_NAME = os.environ["CONNECTION_TABLE"]
+              
+              def lambda_handler(event, context):
+                  print("Event received:", json.dumps(event))
+              
+                  is_eventbridge = "source" in event and "detail" in event
+                  print(f"Event source: {'EventBridge' if is_eventbridge else 'WebSocket'}")
+              
+                  # =====================================================
+                  # ================ EVENTBRIDGE BROADCAST ==============
+                  # =====================================================
+              
+                  if is_eventbridge:
+                      detail = event.get("detail", {})
+                      print("Broadcasting from EventBridge detail:", detail)
+              
+                      feed_id = detail.get("feedId")
+                      asset_id = detail.get("assetId")
+                      company_id = detail.get("companyId")
+                      validation_status = detail.get("validationStatus")
+              
+                      if not feed_id:
+                          return {"statusCode": 400, "body": "Missing 'feedId' in event detail"}
+              
+                      message = {
+                          "event": "feedPosted",
+                          "validationStatus": validation_status,
+                          "companyId": company_id,
+                          "feedId": feed_id,
+                          "assetId": asset_id
+                      }
+              
+                      domain = os.environ["WS_DOMAIN"]
+                      stage = os.environ.get("WS_STAGE", "prod")
+              
+                      apigw = boto3.client("apigatewaymanagementapi", endpoint_url=f"https://{domain}/{stage}")
+              
+                      # Find all connections subscribed to feedId
+                      response = dynamodb.scan(
+                          TableName=TABLE_NAME,
+                          FilterExpression="contains(feedIds, :f)",
+                          ExpressionAttributeValues={":f": {"S": feed_id}}
+                      )
+              
+                      connections = response.get("Items", [])
+                      print(f"Found {len(connections)} subscribers for feedId={feed_id}")
+              
+                      for conn in connections:
+                          socket_id = conn["socketId"]["S"]
+                          connection_uuid = conn["connectionId"]["S"]
+              
+                          try:
+                              apigw.post_to_connection(
+                                  ConnectionId=socket_id,
+                                  Data=json.dumps(message).encode("utf-8")
+                              )
+              
+                          except apigw.exceptions.GoneException:
+                              print(f"Stale WebSocket detected: {socket_id}")
+              
+                              existing_feeds = [x["S"] for x in conn.get("feedIds", {}).get("L", [])]
+              
+                              if feed_id in existing_feeds:
+                                  existing_feeds.remove(feed_id)
+              
+                              dynamodb.update_item(
+                                  TableName=TABLE_NAME,
+                                  Key={"connectionId": {"S": connection_uuid}},
+                                  UpdateExpression="SET feedIds = :f",
+                                  ExpressionAttributeValues={
+                                      ":f": {"L": [{"S": f} for f in existing_feeds]}
+                                  }
+                              )
+              
+                      return {"statusCode": 200, "body": "Broadcast completed."}
+              
+                  # =====================================================
+                  # ================== WEBSOCKET EVENTS =================
+                  # =====================================================
+              
+                  route = event["requestContext"]["routeKey"]
+                  socket_id = event["requestContext"]["connectionId"]
+                  domain = event["requestContext"]["domainName"]
+                  stage = event["requestContext"]["stage"]
+              
+                  apigw = boto3.client("apigatewaymanagementapi", endpoint_url=f"https://{domain}/{stage}")
+              
+                  # ------------------------ CONNECT ---------------------
+                  if route == "$connect":
+                      connection_uuid = str(uuid.uuid4())
+              
+                      # FIX: feedIds must NOT be an empty string set → use List
+                      dynamodb.put_item(
+                          TableName=TABLE_NAME,
+                          Item={
+                              "connectionId": {"S": connection_uuid},
+                              "socketId": {"S": socket_id},
+                              "feedIds": {"L": []},   # ← FIXED
+                          }
+                      )
+              
+                      print(f"Client connected. UUID={connection_uuid}, socketId={socket_id}")
+                      return {"statusCode": 200, "body": "Connected"}
+              
+                  # ----------------------- DISCONNECT -------------------
+                  elif route == "$disconnect":
+                      response = dynamodb.scan(
+                          TableName=TABLE_NAME,
+                          FilterExpression="socketId = :s",
+                          ExpressionAttributeValues={":s": {"S": socket_id}}
+                      )
+              
+                      for item in response.get("Items", []):
+                          connection_uuid = item["connectionId"]["S"]
+                          dynamodb.delete_item(
+                              TableName=TABLE_NAME,
+                              Key={"connectionId": {"S": connection_uuid}}
+                          )
+              
+                      print(f"Client disconnected: {socket_id}")
+                      return {"statusCode": 200, "body": "Disconnected"}
+              
+                  # ------------------------ DEFAULT ----------------------
+                  elif route == "$default":
+                      try:
+                          body = json.loads(event.get("body", "{}"))
+                          print("Received body:", body)
+              
+                          action = body.get("action")
+                          feed_id = body.get("feedId")
+                          asset_id = body.get("assetId")
+                          channel_id = body.get("channelId")
+                          message = body.get("message")
+              
+                          # Find user by socketId
+                          scan_res = dynamodb.scan(
+                              TableName=TABLE_NAME,
+                              FilterExpression="socketId = :s",
+                              ExpressionAttributeValues={":s": {"S": socket_id}}
+                          )
+              
+                          if not scan_res["Items"]:
+                              return {"statusCode": 400, "body": "Socket not registered"}
+              
+                          user_item = scan_res["Items"][0]
+                          connection_uuid = user_item["connectionId"]["S"]
+              
+                          existing_feeds = [x["S"] for x in user_item.get("feedIds", {}).get("L", [])]
+              
+                          # ------------------------ LOGIN ------------------------
+                          if action == "login":
+                              if not feed_id:
+                                  return {"statusCode": 400, "body": "Missing feedId"}
+              
+                              if feed_id not in existing_feeds:
+                                  existing_feeds.append(feed_id)
+              
+                              dynamodb.update_item(
+                                  TableName=TABLE_NAME,
+                                  Key={"connectionId": {"S": connection_uuid}},
+                                  UpdateExpression="SET feedIds = :f, assetId = :a, channelId = :c",
+                                  ExpressionAttributeValues={
+                                      ":f": {"L": [{"S": f} for f in existing_feeds]},
+                                      ":a": {"S": asset_id or ""},
+                                      ":c": {"S": channel_id or ""}
+                                  }
+                              )
+              
+                              print(f"User subscribed UUID={connection_uuid} -> feeds={existing_feeds}")
+                              return {"statusCode": 200, "body": "Login successful"}
+              
+                          # ---------------------- BROADCAST ----------------------
+                          elif action == "broadcast":
+                              response = dynamodb.scan(
+                                  TableName=TABLE_NAME,
+                                  FilterExpression="contains(feedIds, :f)",
+                                  ExpressionAttributeValues={":f": {"S": feed_id}}
+                              )
+              
+                              for conn in response.get("Items", []):
+                                  target_socket = conn["socketId"]["S"]
+                                  target_uuid = conn["connectionId"]["S"]
+              
+                                  try:
+                                      apigw.post_to_connection(
+                                          ConnectionId=target_socket,
+                                          Data=json.dumps({
+                                              "from": connection_uuid,
+                                              "message": message,
+                                              "feedId": feed_id
+                                          }).encode("utf-8")
+                                      )
+                                  except apigw.exceptions.GoneException:
+                                      print(f"Stale connection removing feedId from: {target_socket}")
+              
+                                      existing = [x["S"] for x in conn.get("feedIds", {}).get("L", [])]
+                                      if feed_id in existing:
+                                          existing.remove(feed_id)
+              
+                                      dynamodb.update_item(
+                                          TableName=TABLE_NAME,
+                                          Key={"connectionId": {"S": target_uuid}},
+                                          UpdateExpression="SET feedIds = :f",
+                                          ExpressionAttributeValues={
+                                              ":f": {"L": [{"S": f} for f in existing]}
+                                          }
+                                      )
+              
+                              return {"statusCode": 200, "body": "Broadcast complete"}
+              
+                          return {"statusCode": 400, "body": "Unknown action"}
+              
+                      except Exception as e:
+                          print("Error:", str(e))
+                          return {"statusCode": 500, "body": str(e)}
+              
+                  return {"statusCode": 400, "body": f"Unknown route {route}"}
+      Environment:
+        Variables:
+          CONNECTION_TABLE: !Ref websocketdyn
+          WS_STAGE: "prod"
+          WS_DOMAIN: "Enter the wss endpoint url here of web socket api gateway"
+
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Ref websocketapi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    DependsOn: WebSocketLambda
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketLambda.Arn}/invocations
+      IntegrationMethod: POST
+      #PayloadFormatVersion: 2.0
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    DependsOn: WebSocketLambda
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$connect"
+      AuthorizationType: NONE
+      Target: !Join ["", ["integrations/", !Ref LambdaIntegration]]
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    DependsOn: WebSocketLambda
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$disconnect"
+      AuthorizationType: NONE
+      Target: !Join ["", ["integrations/", !Ref LambdaIntegration]]
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    DependsOn: WebSocketLambda
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: "$default"
+      AuthorizationType: NONE
+      Target: !Join ["", ["integrations/", !Ref LambdaIntegration]]
+
+  LambdaPermissionConnect:
+    Type: AWS::Lambda::Permission
+    DependsOn: WebSocketLambda
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$connect
+
+  LambdaPermissionDisconnect:
+    Type: AWS::Lambda::Permission
+    DependsOn: WebSocketLambda
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$disconnect
+
+  LambdaPermissionDefault:
+    Type: AWS::Lambda::Permission
+    DependsOn: WebSocketLambda
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketLambda
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$default
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    Properties:
+      ApiId: !Ref WebSocketApi
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DefaultRoute
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    DependsOn: WebSocketDeployment
+    Properties:
+      StageName: prod
+      ApiId: !Ref WebSocketApi
+      DeploymentId: !Ref WebSocketDeployment
+Outputs:
+  WebSocketApiEndpoint:
+    Description: "WebSocket API endpoint URL"
+    Value: !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+    Export:
+      Name: websocket
+
+  LambdaFunctionName:
+    Description: "Name of the Lambda function"
+    Value: !Ref WebSocketLambda

@@ -1,0 +1,624 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Content moderation lambda, eventbridge, api gateway."
+Parameters:
+  lambdacontentmodimage:
+    Type: String
+    Description: "Content moderation for image"
+    Default: null
+
+  lambdacontentmodvideo:
+    Type: String
+    Description: "Content moderation for video"
+    Default: null
+
+  lambdacontentmodtext:
+    Type: String
+    Description: "Content moderation for video"
+    Default: null
+
+  ebusname:
+    Type: String
+    Description: Event bus name
+    Default: null
+
+  contentassetbucket:
+    Type: String
+    Description: s3 feeds upload bucket
+    Default: null
+
+  feedscloudfronturl:
+    Type: String
+    Description: feeds upload bucket cloudfront url
+    Default: null
+
+  imageassetfolder:
+    Type: String
+    Description: Image asset prefix folder path
+    Default: null
+
+  videoassetfolder:
+    Type: String
+    Description: Video asset prefix folder path
+    Default: null
+
+  lambdaRuntime:
+    Type: String
+    Description: Lambda runtime
+    Default: null
+
+  logretention:
+    Type: Number
+    Description: Enter the cloudwatch log retention period in days
+    Default: null
+  
+  apikeyname:
+    Default: null
+    Description: API connection key name
+    Type: String
+
+  apikeyvalue:
+    Default: null
+    Description: API connection key value 
+    Type: String
+    NoEcho: true
+
+  hiveapikey:
+    Default: null
+    Description: Enter the hive api key
+    Type: String
+    NoEcho: true
+
+  contmodapiendpoint:
+    Default: null
+    Description: content moderation post endpoint
+    Type: String
+  
+  feedsapiendpoint:
+    Default: null
+    Description: content moderation status update to feeds endpoint
+    Type: String
+  
+  codezipbucket:
+    Description: Enter the lambda code zip bucket name
+    Type: String
+    Default: null
+
+  codezippathimage:
+    Description: Enter the lambda image code zip bucket path
+    Type: String
+    Default: null
+  
+  codezippathvideo:
+    Description: Enter the lambda video code zip bucket path
+    Type: String
+    Default: null
+
+  codezippathtext:
+    Description: Enter the lambda text code zip bucket path
+    Type: String
+    Default: null
+
+  textcontapigateway:
+    Description: Enter the api gateway name for text content moderation to invoke text lambda
+    Type: String
+    Default: null
+  
+  stepfunccontmodname:
+    Description: Enter the name for step function for content moderation video
+    Type: String
+    Default: null
+
+  snsarn:
+    Description: Enter the existing sns topic arn
+    Type: String
+    Default: null
+Resources:
+  lambdaLogGroup1:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${lambdacontentmodimage}
+      RetentionInDays: !Ref logretention
+
+  lambdaLogGroup2:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${lambdacontentmodvideo}
+      RetentionInDays: !Ref logretention
+
+  lambdaLogGroup3:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${lambdacontentmodtext}
+      RetentionInDays: !Ref logretention
+
+  lambdaLogGroupstepfn:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${stepfunccontmodname}
+      RetentionInDays: !Ref logretention
+
+  contmodrole:
+    Type: AWS::IAM::Role
+    DependsOn: contmodmanagedpolicy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      RoleName: !Sub "contentmoderation-lambda-role-${AWS::Region}"
+      ManagedPolicyArns:
+        - !Ref contmodmanagedpolicy
+#        - arn:aws:iam::aws:policy/IAMReadOnlyAccess
+#        - arn:aws:iam::aws:policy/AmazonRekognitionFullAccess
+
+  contmodmanagedpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub contentmoderation-lambda-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Sid: "IAMReadOnlyAccess"
+            Action:
+              - "iam:GenerateCredentialReport"
+              - "iam:GenerateServiceLastAccessedDetails"
+              - "iam:Get*"
+              - "iam:List*"
+              - "iam:SimulateCustomPolicy"
+              - "iam:SimulatePrincipalPolicy"
+            Resource:
+              - "*"
+          - Effect: Allow
+            Sid: "loggroupcreation"
+            Action:
+              - "logs:CreateLogGroup"
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Sid: "Createstream"
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents" 
+            Resource: 
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${lambdacontentmodimage}:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${lambdacontentmodvideo}:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${lambdacontentmodtext}:*"
+          - Effect: Allow
+            Sid: "lambdaInvoke"
+            Action: 
+              - lambda:InvokeFunction
+            Resource: 
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${lambdacontentmodimage}"
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${lambdacontentmodvideo}"
+          - Effect: Allow
+            Sid: "listbucket"
+            Action:
+              - s3:Get*
+              - s3:List*
+              - s3:Describe*
+              - s3-object-lambda:Get*
+              - s3-object-lambda:List*
+            Resource:
+              - !Sub "arn:aws:s3:::${contentassetbucket}"
+              - !Sub "arn:aws:s3:::${contentassetbucket}/*"
+          - Effect: Allow
+            Sid: "Ebus"
+            Action:
+              - events:PutEvents
+            Resource:
+              - !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/${ebusname}"
+
+  contmodlambdaimage:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref lambdacontentmodimage
+      Description: "Content moderation for image"
+      Runtime: !Ref lambdaRuntime
+      Handler: 'index.lambda_handler'
+      Timeout: 300
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Role: !GetAtt contmodrole.Arn
+      Environment:
+        Variables:
+          hivekey: !Ref hiveapikey
+          cloudfrontDomain: !Ref feedscloudfronturl
+          assetfolder: !Ref imageassetfolder
+          eventbusname: !Ref ebusname
+          uploadfeedsbucket: !Ref contentassetbucket
+      Code:
+        S3Bucket: !Ref codezipbucket
+        S3Key: !Ref codezippathimage
+
+  contmodlambdavideo:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref lambdacontentmodvideo
+      Description: "Content moderation for video"
+      Runtime: !Ref lambdaRuntime
+      Handler: 'index.lambda_handler'
+      Timeout: 300
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Role: !GetAtt contmodrole.Arn
+      Environment:
+        Variables:
+          hivekey: !Ref hiveapikey
+          cloudfrontDomain: !Ref feedscloudfronturl
+          assetfolder: !Ref videoassetfolder
+          eventbusname: !Ref ebusname
+          uploadfeedsbucket: !Ref contentassetbucket
+      Code:
+        S3Bucket: !Ref codezipbucket
+        S3Key: !Ref codezippathvideo
+
+  contmodlambdatext:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref lambdacontentmodtext
+      Description: "Content moderation for text"
+      Runtime: !Ref lambdaRuntime
+      Handler: 'lambda_function.lambda_handler'
+      Timeout: 300
+      MemorySize: 256
+      Architectures:
+        - x86_64
+      Role: !GetAtt contmodrole.Arn
+      Environment:
+        Variables:
+          hivekey: !Ref hiveapikey
+          cloudfrontDomain: !Ref feedscloudfronturl
+          eventbusname: !Ref ebusname
+          uploadfeedsbucket: !Ref contentassetbucket
+      Code:
+        S3Bucket: !Ref codezipbucket
+        S3Key: !Ref codezippathtext
+
+  stepfunctcontmodrole:
+    Type: AWS::IAM::Role
+    DependsOn: stepfunctcontmodpolicy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "states.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      RoleName: !Sub "stepfunc-contmod-role-${AWS::Region}"
+      ManagedPolicyArns:
+        - !Ref stepfunctcontmodpolicy
+
+  stepfunctcontmodpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub stepfunc-contmod-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Sid: "SNS"
+            Action:
+              - "sns:Publish"
+            Resource:
+              - "*"
+          - Effect: Allow
+            Sid: "loggroupcreation"
+            Action:
+              - "xray:PutTraceSegments"
+              - "xray:PutTelemetryRecords"
+              - "xray:GetSamplingRules"
+              - "xray:GetSamplingTargets"
+            Resource:
+              - "*"
+          - Effect: Allow
+            Sid: "lambdaInvoke"
+            Action: 
+              - lambda:InvokeFunction
+            Resource: 
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${lambdacontentmodvideo}"
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${lambdacontentmodvideo}:*"
+
+  StepFunctionscontentmoderationvideo:
+    Type: "AWS::StepFunctions::StateMachine"
+    DependsOn: ['contmodlambdavideo']
+    Properties:
+      DefinitionString:
+        Fn::Sub:
+          - |
+            {"Comment":"Content moderation retry workflow with preserved originalEvent",
+             "StartAt":"Initialize",
+             "States":{
+               "Initialize":{"Type":"Pass","Parameters":{"originalEvent.$":"$"},"Next":"InvokeLambda1"},
+               "InvokeLambda1":{"Type":"Task","Resource":"${ContentModerationLambdaArn}","Parameters":{"originalEvent.$":"$.originalEvent"},"ResultPath":"$.LambdaResult","Next":"Check1","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.lambdaError","Next":"Wait60sec"}]},
+               "Check1":{"Type":"Choice","Choices":[{"Variable":"$.LambdaResult.status","NumericEquals":200,"Next":"Success"}],"Default":"Wait60sec"},
+               "Wait60sec":{"Type":"Wait","Seconds":60,"Next":"RetryLambda2"},
+               "RetryLambda2":{"Type":"Task","Resource":"${ContentModerationLambdaArn}","Parameters":{"originalEvent.$":"$.originalEvent"},"ResultPath":"$.RetryLambda2Result","Next":"Check2","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.lambdaError","Next":"Wait120sec"}]},
+               "Check2":{"Type":"Choice","Choices":[{"Variable":"$.RetryLambda2Result.status","NumericEquals":200,"Next":"Success"}],"Default":"Wait120sec"},
+               "Wait120sec":{"Type":"Wait","Seconds":120,"Next":"RetryLambda3"},
+               "RetryLambda3":{"Type":"Task","Resource":"${ContentModerationLambdaArn}","Parameters":{"originalEvent.$":"$.originalEvent"},"ResultPath":"$.RetryLambda3Result","Next":"Check3","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.lambdaError","Next":"Wait180sec"}]},
+               "Check3":{"Type":"Choice","Choices":[{"Variable":"$.RetryLambda3Result.status","NumericEquals":200,"Next":"Success"}],"Default":"Wait180sec"},
+               "Wait180sec":{"Type":"Wait","Seconds":180,"Next":"FinalRetry"},
+               "FinalRetry":{"Type":"Task","Resource":"${ContentModerationLambdaArn}","Parameters":{"originalEvent.$":"$.originalEvent"},"ResultPath":"$.FinalRetryResult","Next":"FinalCheck","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.lambdaError","Next":"SendSNS"}]},
+               "FinalCheck":{"Type":"Choice","Choices":[{"Variable":"$.FinalRetryResult.status","NumericEquals":200,"Next":"Success"}],"Default":"SendSNS"},
+               "SendSNS":{"Type":"Task","Resource":"arn:aws:states:::sns:publish","Parameters":{"TopicArn":"${ContentModerationSnsTopicArn}","Message":{"Fn::ToJsonString":{"error":"Content moderation failed after all retries","originalEvent.$":"$.originalEvent","errorDetails.$":"$.lambdaError"}}},"End":true},
+               "Success":{"Type":"Succeed"}
+             }}
+          - {
+              ContentModerationLambdaArn: !GetAtt contmodlambdavideo.Arn,
+              ContentModerationSnsTopicArn: !Ref snsarn
+            }
+      EncryptionConfiguration:
+        Type: "AWS_OWNED_KEY"
+      LoggingConfiguration:
+        IncludeExecutionData: true
+        Destinations:
+        - CloudWatchLogsLogGroup:
+            LogGroupArn: "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${stepfunccontmodname}:*"
+        Level: "ALL"
+      StateMachineName: !Ref stepfunccontmodname
+      RoleArn: !GetAtt stepfunctcontmodrole.Arn
+      Tags: []
+      StateMachineType: "EXPRESS"
+      TracingConfiguration:
+        Enabled: false
+
+  contmodconnections:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "content-moderation-connection"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  contmodApiDest:
+    Type: "AWS::Events::ApiDestination"
+    DependsOn: contmodconnections
+    Properties:
+      Name: "content-moderation-value"
+      ConnectionArn: !GetAtt contmodconnections.Arn
+      InvocationEndpoint: !Sub "${contmodapiendpoint}/v1"
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  contmodupfeedconnections:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "contentmodertion-feedsstatusupdate-connection"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  contmodupfeedApiDest:
+    Type: "AWS::Events::ApiDestination"
+    DependsOn: contmodupfeedconnections
+    Properties:
+      Name: "content-modertion-feedsstatusupdate"
+      ConnectionArn: !GetAtt contmodupfeedconnections.Arn
+      InvocationEndpoint: !Sub "${feedsapiendpoint}/v1/updatevalidation"
+      HttpMethod: "PATCH"
+      InvocationRateLimitPerSecond: 300
+
+  contmodupconnections:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "contentmodertion-statusupdate-connection"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  contmodupApiDest:
+    Type: "AWS::Events::ApiDestination"
+    DependsOn: contmodupconnections
+    Properties:
+      Name: "content-modertion-statusupdate"
+      ConnectionArn: !GetAtt contmodupconnections.Arn
+      InvocationEndpoint: !Sub ${contmodapiendpoint}/v1
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  EventRole:
+    Type: AWS::IAM::Role
+    DependsOn: ["contmodApiDest", "contmodupfeedApiDest", "contmodupApiDest"]
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - "events.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /service-role/
+      RoleName: !Sub contentmoderation-ebus-${AWS::Region}
+      ManagedPolicyArns:
+        - !Ref eventcontmodpolicy
+
+  eventcontmodpolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub event-contmod-policy-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+              - events:InvokeApiDestination
+            Resource: 
+              - !GetAtt contmodApiDest.Arn
+              - !GetAtt contmodupfeedApiDest.Arn
+              - !GetAtt contmodupApiDest.Arn
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource:
+              - !GetAtt contmodlambdaimage.Arn
+              - !GetAtt contmodlambdavideo.Arn
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource:
+              - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${stepfunccontmodname}
+
+  Rulecontmod1:
+    Type: AWS::Events::Rule
+    DependsOn: [ 'contmodApiDest', 'EventRole' ]
+    Properties:
+      Name: content-moderation-text
+      EventPattern: '{"source":["content-moderation-api"],"detail-type":["content-moderation-process"],"detail":{"contentType":["text"]}}'
+      State: ENABLED
+      EventBusName: !Ref ebusname
+      Targets:
+        - Id: Target1
+          Arn: !GetAtt contmodApiDest.Arn
+          RoleArn: !GetAtt EventRole.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+            MaximumEventAgeInSeconds: 1800
+
+  Rulecontmod2:
+    Type: AWS::Events::Rule
+    DependsOn: [ 'contmodlambdaimage', 'EventRole' ]
+    Properties:
+      Name: content-moderation-image
+      EventPattern: '{"source":["content-moderation-api"],"detail-type":["content-moderation-process"],"detail":{"contentType":["image"]}}'
+      State: ENABLED
+      EventBusName: !Ref ebusname
+      Targets:
+        - Id: Target1
+          Arn: !GetAtt contmodlambdaimage.Arn
+          RoleArn: !GetAtt EventRole.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+            MaximumEventAgeInSeconds: 1800
+
+  Rulecontmod3:
+    Type: AWS::Events::Rule
+    DependsOn: [ 'EventRole' ]
+    Properties:
+      Name: content-moderation-video
+      EventPattern: '{"source":["content-moderation-api"],"detail-type":["content-moderation-process"],"detail":{"contentType":["video"]}}'
+      State: ENABLED
+      EventBusName: !Ref ebusname
+      Targets:
+        - Id: Target1
+          Arn: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${stepfunccontmodname}
+          RoleArn: !GetAtt EventRole.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+            MaximumEventAgeInSeconds: 1800
+
+  Rulecontmod4:
+    Type: AWS::Events::Rule
+    DependsOn: [ 'contmodupfeedApiDest', 'contmodupApiDest', 'EventRole' ]
+    Properties:
+      Name: content-moderation-update
+      EventPattern: '{"source":["content-moderation-update-api"],"detail-type":["content-moderation-update-process"]}'
+      State: ENABLED
+      EventBusName: !Ref ebusname
+      Targets:
+        - Id: Target1
+          Arn: !GetAtt contmodupfeedApiDest.Arn
+          RoleArn: !GetAtt EventRole.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+            MaximumEventAgeInSeconds: 1800
+        - Id: Target2
+          Arn: !GetAtt contmodupApiDest.Arn
+          RoleArn: !GetAtt EventRole.Arn
+          RetryPolicy:
+            MaximumRetryAttempts: 3
+            MaximumEventAgeInSeconds: 1800
+
+  # API Gateway HTTP API
+  textmodhttpapi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Ref textcontapigateway
+      Description: Mailerlite webhook
+      ProtocolType: HTTP
+
+  # API Integration with Lambda
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref textmodhttpapi
+      IntegrationType: "AWS_PROXY"
+      IntegrationUri: !GetAtt contmodlambdatext.Arn
+      PayloadFormatVersion: "2.0"
+    
+  # API Route
+  textpostHttpApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref textmodhttpapi
+      RouteKey: "POST /v1/validateText"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  textgetHttpApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref textmodhttpapi
+      RouteKey: "GET /v1/validateText"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  # API Deployment
+  textcontHttpApiDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    Properties:
+      ApiId: !Ref textmodhttpapi
+    DependsOn: ["textpostHttpApiRoute", "textgetHttpApiRoute"]
+
+  # API Stage
+  textcontHttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref textmodhttpapi
+      StageName: "$default"
+      DeploymentId: !Ref textcontHttpApiDeployment
+
+  MyLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: contmodlambdatext
+    Properties:
+      FunctionName: !Ref contmodlambdatext
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${textmodhttpapi}/*/*/v1/validateText"
+
+Outputs:
+  contmodlambdarole:
+    Value: !GetAtt contmodrole.Arn
+    Description: content moderation lambda role arn
+  contmodeventrole:
+    Value: !GetAtt EventRole.Arn
+    Description: content moderation iam role arn
+  stepfnrole:
+    Value: !GetAtt stepfunctcontmodrole.Arn
+    Description: step function role arn

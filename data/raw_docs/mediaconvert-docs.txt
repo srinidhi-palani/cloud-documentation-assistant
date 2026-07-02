@@ -1,0 +1,45 @@
+Template: cctool-mediaconvert.yml
+Category: Lambda / MediaConvert / S3
+
+Purpose:
+This template creates a MediaConvert video processing pipeline for converting uploaded videos to HLS format. It supports both cctool and feeds asset types with separate Lambda functions for main conversion and thumbnail generation.
+
+AWS Services Used:
+- AWS Lambda: Two functions - main MediaConvert job trigger and thumbnail converter
+- AWS Elemental MediaConvert: Video transcoding to HLS format
+- Amazon S3: Source and destination buckets for video assets
+- AWS CloudWatch Logs: Logging for Lambda functions
+- AWS IAM: Lambda execution role with MediaConvert permissions
+
+Key Features:
+- Supports two asset types: cctoolhls and feeds
+- Separate Lambda for thumbnail generation
+- Configurable source and destination S3 buckets
+- Asset-type-specific folder triggers and destinations
+- NOTE: S3 bucket triggers must be added manually if buckets already exist
+
+Asset Type Configurations:
+- cctoolhls: Uploads from video/ folder, thumbnails to video/ folder
+- feeds: Uploads from media/video/ folder, thumbnails to media/ folder
+
+HLS Presets Available:
+- aws-mediaconvert-preset-hls-1-5-m.json: 1.5 Mbps HLS preset
+- aws-mediaconvert-preset-hls-1-m.json: 1 Mbps HLS preset
+- aws-mediaconvert-preset-hls-4-m.json: 4 Mbps HLS preset
+- aws-mediaconvert-preset-hls-600-k.json: 600 Kbps HLS preset
+- aws-mediaconvert-preset-hls-thumbnails.json: Thumbnail generation preset
+
+Parameters:
+- pythonversion: Lambda Python runtime version
+- lambdafunction: Main Lambda function name
+- lambdafunctionthumb: Thumbnail Lambda function name
+- srcassetbucket: Source S3 bucket
+- destassetbucket: Destination S3 bucket
+- codezipbucket: S3 bucket containing Lambda code zip
+- assettype: cctoolhls or feeds
+
+Use Cases:
+- Convert uploaded videos to HLS for streaming
+- Generate thumbnails from uploaded videos
+- Multi-bitrate HLS output for adaptive streaming
+- Separate pipelines for CC tool and feeds content

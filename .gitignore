@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv311/
+venv/
+.venv/
+
+# Environment Variables
+.env
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform-test/
+
+# FAISS Index
+faiss_index/
+
+# VS Code
+.vscode/
+
+# OS Files
+.DS_Store
+Thumbs.db

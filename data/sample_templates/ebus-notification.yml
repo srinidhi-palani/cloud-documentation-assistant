@@ -1,0 +1,135 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Creating an eventbridge for notification"
+Parameters:
+  Busname:
+    Default: null
+    Description: Name of the custom eventbridge bus
+    Type: String
+
+  apikeyname:
+    Default: null
+    Description: API connection key name
+    Type: String
+
+  apikeyvalue:
+    Default: null
+    Description: API connection key value 
+    NoEcho: true
+    Type: String
+
+  notifyendpoint:
+    Default: null
+    Description: URL & Endpoint for notification
+    Type: String
+
+  logretention:
+    Type: Number
+    Description: Enter the cloudwatch log retention period in days
+    Default: null
+Resources:
+  CustomEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref Busname
+
+  eventconnection:
+    Type: "AWS::Events::Connection"
+    Properties:
+      Name: "Notificationconnection"
+      AuthorizationType: "API_KEY"
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: !Ref apikeyname
+          ApiKeyValue: !Ref apikeyvalue
+        InvocationHttpParameters: {}
+
+  notificationApiDest:
+    Type: "AWS::Events::ApiDestination"
+    Properties:
+      Name: "Notify"
+      ConnectionArn: !GetAtt eventconnection.Arn
+      InvocationEndpoint: !Ref notifyendpoint
+      HttpMethod: "POST"
+      InvocationRateLimitPerSecond: 300
+
+  notificationloggroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub /aws/events/${Busname}
+      RetentionInDays: !Ref logretention
+
+  notificationapidest:
+    Type: AWS::IAM::Role
+    DependsOn: lambdaManagedPolicy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      RoleName: !Sub s3uploadlambda-${AWS::Region}
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref lambdaManagedPolicy
+
+  lambdaManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ebus-notification-${AWS::Region}
+      Path: /service-role/
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+            - events:InvokeApiDestination
+            Resource:
+            - !GetAtt notificationApiDest.Arn
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/${Busname}"
+
+  notificationruleER:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "Notify"
+      EventPattern: "{\"source\":[\"notify-api\"],\"detail-type\":[\"notify-process\"]}"
+      State: "ENABLED"
+      Targets: 
+        - Arn: !GetAtt notificationApiDest.Arn
+          HttpParameters: 
+             HeaderParameters: {}
+             QueryStringParameters: {}
+          RoleArn: !GetAtt notificationapidest.Arn
+          Id: notification-1
+        - Arn: !GetAtt notificationloggroup.Arn
+          Id: notification-2
+      EventBusName: !Ref CustomEventBus
+
+  EventParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: eventBusnotification
+      Type: String
+      Value: !GetAtt CustomEventBus.Arn
+      Description: Arn of eventbus from eventbridge
+
+Outputs:
+  EventBus:
+    Value: !Ref CustomEventBus
+  notificationruleER:
+    Description: Arn of coursetrack event rule
+    Value: !GetAtt notificationruleER.Arn
+  iamrole:
+    Value: !GetAtt notificationapidest.Arn

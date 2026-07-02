@@ -1,0 +1,182 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudFormation template that creates a Lambda function with an API Gateway
+  REST API, IAM managed policy, and CloudWatch log group.
+
+Parameters:
+
+  LambdaRuntime:
+    Type: String
+    Default: python3.11
+    Description: Lambda runtime
+
+  LambdaTimeout:
+    Type: Number
+    Default: 30
+    Description: Lambda timeout in seconds
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 128
+    Description: Lambda memory size in MB
+
+  ApiStageName:
+    Type: String
+    Default: prod
+    Description: API Gateway stage name
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch log retention in days
+
+Resources:
+
+  # ----------------------------------------------------------
+  # CLOUDWATCH LOG GROUP
+  # ----------------------------------------------------------
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ----------------------------------------------------------
+  # IAM MANAGED POLICY FOR LAMBDA
+  # ----------------------------------------------------------
+  LambdaManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Minimum permissions for Lambda function
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: CloudWatchLogsPermissions
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !GetAtt LambdaLogGroup.Arn
+
+  # ----------------------------------------------------------
+  # IAM ROLE FOR LAMBDA
+  # ----------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref LambdaManagedPolicy
+
+  # ----------------------------------------------------------
+  # LAMBDA FUNCTION
+  # ----------------------------------------------------------
+  ApiLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Lambda function triggered by API Gateway
+      Runtime: !Ref LambdaRuntime
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      LoggingConfig:
+        LogGroup: !Ref LambdaLogGroup
+      Code:
+        ZipFile: |
+          import json
+
+          def lambda_handler(event, context):
+              return {
+                  "statusCode": 200,
+                  "headers": {
+                      "Content-Type": "application/json"
+                  },
+                  "body": json.dumps({
+                      "message": "Hello from Lambda!",
+                      "event": event
+                  })
+              }
+
+  # ----------------------------------------------------------
+  # API GATEWAY REST API
+  # ----------------------------------------------------------
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: REST API backed by Lambda
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # ----------------------------------------------------------
+  # API GATEWAY RESOURCE
+  # ----------------------------------------------------------
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref RestApi
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: "invoke"
+
+  # ----------------------------------------------------------
+  # API GATEWAY METHOD
+  # ----------------------------------------------------------
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref RestApi
+      ResourceId: !Ref ApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+          - LambdaArn: !GetAtt ApiLambdaFunction.Arn
+
+  # ----------------------------------------------------------
+  # LAMBDA PERMISSION FOR API GATEWAY
+  # ----------------------------------------------------------
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ApiLambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*"
+
+  # ----------------------------------------------------------
+  # API GATEWAY DEPLOYMENT
+  # ----------------------------------------------------------
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiMethod
+    Properties:
+      RestApiId: !Ref RestApi
+
+  # ----------------------------------------------------------
+  # API GATEWAY STAGE
+  # ----------------------------------------------------------
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref RestApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: !Ref ApiStageName
+
+Outputs:
+
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${ApiStageName}/invoke"
+
+  LambdaFunctionName:
+    Description: Lambda function name
+    Value: !Ref ApiLambdaFunction

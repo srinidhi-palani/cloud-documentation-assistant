@@ -1,0 +1,31 @@
+Template: ebus-notification.yml
+Category: EventBridge / API Destinations / CloudWatch
+
+Purpose:
+This template creates an EventBridge notification infrastructure with a custom event bus, API destination, and CloudWatch logging for sending notifications to an external notification service.
+
+AWS Services Used:
+- Amazon EventBridge: Custom event bus for notification events
+- AWS Events Connection: API Key authenticated connection
+- AWS Events API Destination: HTTP endpoint for notification service
+- AWS CloudWatch Logs: Log group for EventBridge rule execution
+- AWS IAM: Role for EventBridge to invoke API destinations
+
+Key Features:
+- Custom EventBridge bus for notification events
+- API Key authentication for notification service
+- CloudWatch log group for notification audit trail
+- Configurable log retention period
+
+Parameters:
+- Busname: Custom EventBridge bus name
+- apikeyname: API Key header name
+- apikeyvalue: API Key value (NoEcho)
+- notifyendpoint: Notification service endpoint URL
+- logretention: CloudWatch log retention in days
+
+Use Cases:
+- Send real-time notifications to users
+- Event-driven notification workflows
+- Push notifications via external service
+- Email/SMS notification triggers

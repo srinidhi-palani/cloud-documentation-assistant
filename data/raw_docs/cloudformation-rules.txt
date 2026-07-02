@@ -1,0 +1,15 @@
+CloudFormation Best Practices — Auto-applied by assistant
+
+IAM: Always use AWS::IAM::ManagedPolicy — never inline policies
+Names: Never hardcode — always use !Sub "${AWS::StackName}-..."
+Endpoints: Always enforce https:// via AllowedPattern
+Parameters: Always add Description to every parameter
+Secrets: Always use NoEcho: true for API keys
+SQS: No Description property — use Tags instead
+Pipes Source and Target: must be plain !GetAtt ARN strings
+ApiDestination: Use InvocationEndpoint not Endpoint
+Connection: Must use ApiKeyAuthParameters structure
+Scheduler: Must have FlexibleTimeWindow: Mode: "OFF"
+Lambda: Use python3.12 and boto3 by default
+Outputs: Always export with !Sub "${AWS::StackName}-..."
+DLQ: Always add Dead Letter Queue with maxReceiveCount 3

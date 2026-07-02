@@ -1,0 +1,41 @@
+Template: websocket.yaml
+Category: Lambda / API Gateway WebSocket / DynamoDB
+
+Purpose:
+This template creates a WebSocket API using API Gateway, backed by a Lambda function and DynamoDB for connection management. It enables real-time bidirectional communication between clients and the server.
+
+AWS Services Used:
+- Amazon API Gateway: WebSocket API for real-time connections
+- AWS Lambda: Handles WebSocket connect, disconnect, and message events
+- Amazon DynamoDB: Stores active WebSocket connection IDs
+- AWS IAM: Managed policy for Lambda permissions
+- AWS CloudWatch Logs: Logging for WebSocket events
+
+Key Features:
+- WebSocket API with connect, disconnect, and default routes
+- DynamoDB for persistent connection ID storage
+- Lambda managed policy with DynamoDB and WebSocket permissions
+- Deletion protection enabled on DynamoDB table
+- Provisioned throughput for predictable performance
+- NOTE: WSS URL must be manually added to Lambda environment after deployment
+
+Parameters:
+- websocketdyn: DynamoDB table name for connection storage
+- websocketLambda: Lambda function name
+- websocketapi: WebSocket API name
+
+DynamoDB Schema:
+- Primary Key: connectionId (String, Hash Key)
+- Billing Mode: PROVISIONED (5 RCU/5 WCU)
+- Deletion Protection: Enabled
+
+IAM Permissions:
+- dynamodb: GetItem, BatchGetItem, Query, Scan, PutItem, UpdateItem, DeleteItem, BatchWriteItem
+- execute-api: ManageConnections
+- logs: CreateLogGroup, CreateLogStream, PutLogEvents
+
+Use Cases:
+- Real-time notifications and alerts
+- Live chat functionality
+- Live dashboards and data updates
+- Real-time collaboration features

@@ -1,0 +1,30 @@
+{
+  "Description": "Custom preset: HLS Thumbnails",
+  "Name": "HLS Thumbnails",
+  "Settings": {
+    "VideoDescription": {
+      "Width": 1280,
+      "ScalingBehavior": "FIT",
+      "Height": 720,
+      "TimecodeInsertion": "DISABLED",
+      "AntiAlias": "ENABLED",
+      "Sharpness": 50,
+      "CodecSettings": {
+        "Codec": "FRAME_CAPTURE",
+        "FrameCaptureSettings": {
+          "FramerateNumerator": 1,
+          "FramerateDenominator": 300,
+          "MaxCaptures": 500,
+          "Quality": 80
+        }
+      },
+      "AfdSignaling": "NONE",
+      "DropFrameTimecode": "ENABLED",
+      "RespondToAfd": "NONE",
+      "ColorMetadata": "INSERT"
+    },
+    "ContainerSettings": {
+      "Container": "RAW"
+    }
+  }
+}
