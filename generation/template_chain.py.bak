@@ -1,0 +1,2975 @@
+# import re
+# import json
+# import boto3
+# from langchain_aws import ChatBedrock
+# from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+# from config.config import BEDROCK_MODEL_ID, AWS_REGION, BEDROCK_PROFILE
+# from retrieval.retriever import retrieve_and_format
+
+# KNOWN_GOOD_PATTERNS = """
+# Reference patterns — copy this exact syntax when these resources appear:
+
+# # EventBridge Connection (no InvocationType property exists)
+# MyConnection:
+#   Type: AWS::Events::Connection
+#   Properties:
+#     Name: my-connection
+#     AuthorizationType: API_KEY
+#     AuthParameters:
+#       ApiKeyAuthParameters:
+#         ApiKeyName: key1
+#         ApiKeyValue: !Ref ApiKeyParam
+
+# # EventBus with logging (property is LogConfig, not LoggingConfig; IncludeDetail is a STRING with allowed values FULL/NONE, never a boolean; no LogGroupArn property exists)
+# MyEventBus:
+#   Type: AWS::Events::EventBus
+#   Properties:
+#     Name: my-bus
+#     KmsKeyIdentifier: alias/aws/events
+#     LogConfig:
+#       Level: ERROR
+#       IncludeDetail: "FULL"
+
+# # Pipe logging (property is LogConfiguration, NOT LogConfig — that's the EventBus property name, do not reuse it here. Nests under CloudwatchLogsLogDestination.LogGroupArn; IncludeExecutionData is a LIST of strings like ["ALL"], not a boolean; Level is a string. Like any other target writing to CloudWatch Logs, the log group needs a companion ResourcePolicy or logs silently never arrive.)
+# MyPipeLogGroup:
+#   Type: AWS::Logs::LogGroup
+#   Properties:
+#     LogGroupName: /aws/vendedlogs/pipes/my-pipe
+# MyPipeLogGroupPolicy:
+#   Type: AWS::Logs::ResourcePolicy
+#   Properties:
+#     PolicyName: !Sub "${AWS::StackName}-pipe-logs-policy"
+#     PolicyDocument: !Sub |
+#       {"Version":"2012-10-17","Statement":[{"Sid":"TrustPipesToStoreLogEvent","Effect":"Allow","Principal":{"Service":"pipes.amazonaws.com"},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/pipes/my-pipe:*"}]}
+# MyPipeWithLogging:
+#   Type: AWS::Pipes::Pipe
+#   DependsOn: MyPipeLogGroupPolicy
+#   Properties:
+#     DesiredState: RUNNING
+#     LogConfiguration:
+#       Level: ERROR
+#       IncludeExecutionData:
+#         - "ALL"
+#       CloudwatchLogsLogDestination:
+#         LogGroupArn: !GetAtt MyPipeLogGroup.Arn
+
+# # Any string containing ${AWS::...} pseudo parameters MUST be wrapped in !Sub, or CloudFormation leaves the literal text "${AWS::Region}" unresolved instead of substituting it
+# CorrectPseudoParamUsage: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/example:*"
+
+# # Rule targeting CloudWatch Logs — Target has no TargetType field, and needs a companion ResourcePolicy or logs silently never arrive
+# MyLogGroup:
+#   Type: AWS::Logs::LogGroup
+#   Properties:
+#     LogGroupName: /aws/events/my-rule
+# MyLogGroupPolicy:
+#   Type: AWS::Logs::ResourcePolicy
+#   Properties:
+#     PolicyName: !Sub "${AWS::StackName}-eventbridge-logs-policy"
+#     PolicyDocument: !Sub |
+#       {"Version":"2012-10-17","Statement":[{"Sid":"TrustEventsToStoreLogEvent","Effect":"Allow","Principal":{"Service":["events.amazonaws.com","delivery.logs.amazonaws.com"]},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/my-rule:*"}]}
+# MyRule:
+#   Type: AWS::Events::Rule
+#   DependsOn: MyLogGroupPolicy
+#   Properties:
+#     Targets:
+#       - Id: LogsTarget
+#         Arn: !GetAtt MyLogGroup.Arn
+
+# # Referencing a ManagedPolicy (Ref returns the ARN — GetAtt has no Arn attribute)
+# ManagedPolicyArns:
+#   - !Ref MyManagedPolicy
+#   # Never invent an AWS-managed policy ARN name (e.g. AmazonEventBridgeApiDestinationsRolePolicy, AWSEventsPipesFullAccess) unless you are certain it exists in the real AWS provider. If uncertain, always create a new AWS::IAM::ManagedPolicy resource scoped to only the specific actions/resources needed, rather than guessing a managed policy name.
+
+# # Pipe activation state (property is DesiredState, values RUNNING/STOPPED — not PipeState/ENABLED)
+# MyPipe:
+#   Type: AWS::Pipes::Pipe
+#   Properties:
+#     DesiredState: RUNNING
+# # AWS::Pipes::Pipe has NO FlexibleTimeWindow property — that belongs only to AWS::Scheduler::Schedule. Never add FlexibleTimeWindow to a Pipe resource under any circumstances.
+
+# # IAM action for invoking an API Destination (not events:PutEvents)
+# MyApiDestinationPolicy:
+#   Type: AWS::IAM::ManagedPolicy
+#   Properties:
+#     PolicyDocument:
+#       Version: "2012-10-17"
+#       Statement:
+#         - Effect: Allow
+#           Action:
+#             - events:InvokeApiDestination
+#           Resource: !GetAtt MyApiDestination.Arn
+
+# # AWS::Pipes::Pipe HttpParameters — all three sub-fields are PascalCase.
+# # QueryStringParameters is commonly miswritten as queryStringParameters
+# # (lowercase q) — this fails cfn-lint (E3002) even though the other two
+# # fields are usually cased correctly.
+# TargetParameters:
+#   HttpParameters:
+#     PathParameterValues: []
+#     HeaderParameters: {}
+#     QueryStringParameters: {}
+#   InputTemplate: "{\"body\": <$.body>}"
+
+# # Rule target RoleArn vs Pipe RoleArn — DO NOT reuse. A role's trust policy
+# # Principal must match the service that will assume it. A role trusted by
+# # pipes.amazonaws.com cannot be used as a Rule target's RoleArn (which needs
+# # events.amazonaws.com), and vice versa. Each needs its own role + policy.
+# MyRuleRole:
+#   Type: AWS::IAM::Role
+#   Properties:
+#     AssumeRolePolicyDocument:
+#       Version: "2012-10-17"
+#       Statement:
+#         - Effect: Allow
+#           Principal:
+#             Service: events.amazonaws.com
+#           Action: sts:AssumeRole
+#     ManagedPolicyArns:
+#       - !Ref MyRulePolicy
+
+# # Ref on AWS::Events::Connection returns the FULL CONNECTION ARN, never the
+# # connection name. Never interpolate !Ref <Connection> into a secret ARN
+# # string expecting a bare name — use the literal Name string instead, with
+# # a wildcard for the auto-generated suffix (the suffix cannot be known at
+# # template-authoring time):
+# Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:events!connection/MyConnectionName/*"
+
+# # Rule 32 — Ref vs GetAtt for ARNs on Rule/Pipe outputs. Ref on
+# # AWS::Events::Rule and AWS::Pipes::Pipe returns the resource NAME, not
+# # the ARN. This deploys fine and passes cfn-lint (it's not a schema
+# # error), but silently exports the wrong value to anyone consuming it
+# # via Fn::ImportValue expecting an ARN. Always use !GetAtt <LogicalId>.Arn
+# # for these two resource types when an ARN is needed, e.g. in Outputs:
+# Outputs:
+#   RuleArn:
+#     Value: !GetAtt MTMSCourseInstallationRule.Arn
+#   PipeArn:
+#     Value: !GetAtt MTMSCourseInstallationPipe.Arn
+# """
+
+
+# CLOUDFORMATION_RULES_ONLY = """
+# When generating any CloudFormation template always follow these rules without being told:
+
+# 1. IAM — always use AWS::IAM::ManagedPolicy resources, never inline policies. Attach via ManagedPolicyArns on the Role directly. Never use AWS::IAM::PolicyAttachment, it is not a valid resource type.
+# 2. Names — never hardcode resource names. Always use !Sub "${AWS::StackName}-..." for all resource names.
+# 3. Endpoints — any URL parameter must have AllowedPattern: "^https://.*" and ConstraintDescription.
+# 4. Parameters — every parameter must have a Description field.
+# 5. Secrets — always use NoEcho: true for API keys, passwords, tokens.
+# 6. SQS — AWS::SQS::Queue does not support Description property. Use Tags instead.
+# 7. Pipes — AWS::Pipes::Pipe Source and Target must be plain !GetAtt ARN strings, not nested objects.
+# 8. ApiDestination — use InvocationEndpoint property, not Endpoint or DestinationArn. Always include HttpMethod and InvocationRateLimitPerSecond.
+# 9. Connection — always use ApiKeyAuthParameters structure exactly:
+#    AuthorizationType: API_KEY
+#    AuthParameters:
+#      ApiKeyAuthParameters:
+#        ApiKeyName: <ref>
+#        ApiKeyValue: <ref>
+# 10. Pipes IAM — scope permissions to specific resource ARNs, never use Resource: "*". Always include secretsmanager:GetSecretValue and secretsmanager:DescribeSecret on arn:aws:secretsmanager:*:*:secret:events!connection/*
+# 11. Scheduler — always include FlexibleTimeWindow with Mode as a quoted string "OFF":
+#     FlexibleTimeWindow:
+#       Mode: "OFF"
+#     IMPORTANT: Never write Mode: OFF without quotes. YAML will parse OFF as boolean false and CloudFormation will reject it.
+# 12. Lambda — use python3.12 and boto3 by default. Read all config from os.environ.
+# 12b. Lambda Code — AWS::Lambda::Function always requires a Code property. If the user's request is infrastructure-only with no actual function logic provided, use a minimal inline placeholder:
+#      Code:
+#        ZipFile: |
+#          def handler(event, context):
+#              print(event)
+#              return {"statusCode": 200}
+#      Never omit Code entirely — cfn-lint rejects it as a required property (E3003).
+# 12c. IAM Role policies referencing their own resource's log group — when writing a Lambda execution role's CloudWatch Logs policy, never use !Sub with ${LogicalId} where LogicalId is the Lambda function that has Role: !GetAtt <ThisRole>.Arn — that creates a circular dependency (E3004). Instead, hardcode the log group path using the same !Sub "${AWS::StackName}-..." pattern already used for the function's FunctionName, e.g. arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-<function-name-suffix>:* — never interpolate the function's logical ID itself.
+# 13. Outputs — always export every output with Export: Name: !Sub "${AWS::StackName}-<name>". Include an output for every major resource created.
+# 14. DLQ — always add a Dead Letter Queue for SQS source queues with maxReceiveCount: 3
+# 15. Return only valid YAML — no explanations before or after the template. WRONG: "Here's the CloudFormation template you requested:\n\nAWSTemplateFormatVersion: ...". CORRECT: response starts directly with "AWSTemplateFormatVersion: '2010-09-09'".
+# 16. YAML boolean trap — always quote these values when used as strings: "OFF", "ON", "YES", "NO", "TRUE", "FALSE". Without quotes YAML parses them as booleans, causing CloudFormation validation errors.
+# 17. Required parameters — for any Parameter without a Default value, the Description must clearly state it is required and include an example. Example: Description: "Required. The endpoint URL for the Unit API. Example: https://api.example.com/notify"
+# 18. Conversation memory — if the user refers to "the template", "this template", "the one above", "it", or asks to "fix" or "update" something without repasting the full YAML, look at the most recent template in the conversation history and modify that one. Always return the FULL corrected template, not just the changed parts.
+# 19. EventBridge → CloudWatch Logs targets — a Rule or Pipe target pointing at a CloudWatch Logs log group requires a companion AWS::Logs::ResourcePolicy granting events.amazonaws.com and delivery.logs.amazonaws.com permission to CreateLogStream/PutLogEvents on that log group ARN. CloudFormation cannot create this automatically (only the console does it silently) — omitting it means the rule deploys successfully but silently never delivers any logs. Never put a TargetType field on a Target object; it does not exist in the schema — a CloudWatch Logs target is identified purely by its Arn.
+# 20. AWS::IAM::ManagedPolicy references — ManagedPolicy has no "Arn" attribute in Fn::GetAtt. Always reference it with !Ref <LogicalId> to get its ARN, never !GetAtt <LogicalId>.Arn.
+# 21. AWS::Events::Connection has no InvocationType property — never include it. AWS::Events::EventBus encryption/logging uses KmsKeyIdentifier directly (no EncryptionType wrapper) and LogConfig with fields Level (string: OFF/ERROR/INFO/TRACE) and IncludeDetail (string: FULL/NONE — never a boolean). There is no LogGroupArn property on EventBus — EventBridge manages the log destination itself via LogConfig.
+# 22. API Destination invocation permission — the IAM action required to invoke an API Destination is events:InvokeApiDestination. Never use events:PutEvents for this purpose.
+# 23. AWS::Pipes::Pipe logging — the property is LogConfiguration, never LogConfig (LogConfig is the EventBus property name, do not reuse it on a Pipe). It nests under CloudwatchLogsLogDestination.LogGroupArn, IncludeExecutionData (a LIST of strings, e.g. ["ALL"], not a boolean), and Level (string). Exactly like a Rule target writing to CloudWatch Logs, the pipe's log group needs a companion AWS::Logs::ResourcePolicy granting pipes.amazonaws.com permission to CreateLogStream/PutLogEvents on that log group's ARN — never emit a ResourcePolicy with an empty or incomplete PolicyDocument (missing Principal/Action/Resource); it must always contain the full, valid statement.
+# 24. Pseudo parameters inside string literals — any string containing ${AWS::Region}, ${AWS::AccountId}, ${AWS::StackName}, or similar must be wrapped in !Sub. A bare string like Resource: "arn:...:${AWS::Region}:..." without !Sub is invalid; CloudFormation will not substitute the variable and it will deploy with the literal, unresolved text.
+# 25. Logical IDs — every resource's logical ID (the YAML key naming the resource, e.g. MyBucket: under Resources:) must be alphanumeric only — no underscores, no hyphens. CloudFormation logical IDs must match ^[a-zA-Z0-9]+$. Use PascalCase instead of underscores: write MTMSCourseInstallationConnection, never MTMS_Course_Installation_Connection. This applies only to the logical ID itself — the Name: property inside Properties (e.g. Name: MTMS-Course-Installation) may still contain hyphens and is unaffected.
+# 26. Colons inside plain string values — any Description, ConstraintDescription, or other string value that contains a colon followed by a space (": "), such as "Example: https://..." or "Note: ...", must be wrapped in double quotes. YAML interprets an unquoted ": " as the start of a new mapping key even mid-sentence, which causes a template-wide parsing error.
+# 27. AWS::Pipes::Pipe SQS source — the property is SqsQueueParameters (lowercase "qs"), never SQSQueueParameters.
+# 28. AWS::Pipes::Pipe API Destination target — HttpParameters and InputTemplate go directly under TargetParameters with no wrapper property. There is no EventBridgeApiDestinationParameters property; it does not exist in the schema. If the user asks to pass "only the body" or similar, always include InputTemplate: "{\"body\": <$.body>}" under TargetParameters — omitting it forwards the entire event, not just the body.
+# 29. SQS queue type — never create a FIFO queue (no .fifo suffix, no FifoQueue: true, no ContentBasedDeduplication) unless the user explicitly says "FIFO". A request for a "Standard queue" or unspecified queue type must produce a plain AWS::SQS::Queue with no FIFO properties.
+# 30. AWS::Events::Connection Ref — Ref returns the FULL ARN, not the connection name. Never build a secret ARN string like "events!connection!${MyConnection}" expecting a name — that inserts an entire ARN into the string, producing an invalid path. Use the literal connection Name string plus a wildcard suffix instead.
+# 31. RoleArn/Principal matching — every IAM Role handed to a resource as a RoleArn (Rule target, Pipe RoleArn, Scheduler role, etc.) must have an AssumeRolePolicyDocument Principal matching the exact service that will assume it. Never reuse one role across two different target types (e.g. a role trusted by pipes.amazonaws.com must never be assigned as a Rule target's RoleArn, which requires events.amazonaws.com). Each distinct assuming service gets its own Role + ManagedPolicy pair.
+# 32. Ref return-value differences per resource type — ... Never assume Ref returns an ARN without checking this list first; when in doubt, use !GetAtt <LogicalId>.Arn.
+# 33. AWS::Pipes::Pipe HttpParameters casing — under TargetParameters.HttpParameters, all three sub-fields must be exact PascalCase: PathParameterValues, HeaderParameters, QueryStringParameters. The model has repeatedly emitted "queryStringParameters" with a lowercase q — this is invalid and fails cfn-lint (E3002). Always write QueryStringParameters with a capital Q, matching PathParameterValues and HeaderParameters exactly.
+# 34. Self-referential RedrivePolicy — a queue's RedrivePolicy.deadLetterTargetArn must never reference its own logical ID (e.g. MTMSCourseInstallationDLQ pointing RedrivePolicy at !GetAtt MTMSCourseInstallationDLQ.Arn). This creates an unresolvable circular dependency. A Dead Letter Queue itself does not need a RedrivePolicy unless the user explicitly requests a second-tier DLQ chain (DLQ -> DLQ2) — do not add one to a DLQ just because a source queue nearby has one.
+# 35. AWS::SQS::Queue message retention property name — the property is MessageRetentionPeriod, never RetentionPeriod. "RetentionPeriod" does not exist on this resource type and fails cfn-lint (E3002). This applies to both source queues and their Dead Letter Queues.
+# 36. Account-level SCP constraints — this account enforces two Service Control Policies that cfn-lint cannot see, so violating them produces a template that validates fine but is DENIED at deploy time:
+#     a) Instance sizing ceiling — AWS::EC2::Instance/LaunchConfiguration/LaunchTemplate InstanceType must be one of t*.micro/t*.small/t*.medium/t*.large only (e.g. t3.micro, t3a.small — never m5.large, t3.xlarge, or anything outside micro/small/medium/large). AWS::RDS::DBInstance DBInstanceClass must be db.t*.micro/small/medium/large only. AWS::ElastiCache::CacheCluster/ReplicationGroup CacheNodeType must be cache.t*.micro only — no other cache size is permitted.
+#     b) No root principal — never write a Principal that references the account root ARN (arn:aws:iam::*:root) in any trust policy, resource policy, or bucket/queue policy. This is denied unconditionally regardless of the intended permissions — always scope Principal to a specific service (e.g. events.amazonaws.com) or a specific IAM role/user ARN instead.
+# """
+
+
+# CLOUDFORMATION_RULES = KNOWN_GOOD_PATTERNS + """
+# You are a CloudFormation expert assistant.
+
+# OUTPUT FORMAT — READ THIS FIRST: Your entire response must be the raw YAML template and nothing else. Do not include any preamble, explanation, summary, or closing remarks — not even a single line like "Here is the template:" or "Let me know if you need changes." The first character of your response must be the YAML content itself (e.g. "AWSTemplateFormatVersion:"), and the last character must be the final line of the template.
+# """ + CLOUDFORMATION_RULES_ONLY
+
+
+# TERRAFORM_RULES_ONLY = """
+# When generating Terraform configuration in JSON syntax (.tf.json), always follow these rules without being told:
+
+# 1. Structure — top-level keys are "terraform", "provider", "resource", "variable", "output" as needed. Output must be a single valid JSON object.
+# 2. Provider block — always include:
+#    "terraform": {"required_providers": {"aws": {"source": "hashicorp/aws", "version": "~> 5.0"}}},
+#    "provider": {"aws": {"region": "eu-north-1"}}
+# 3. Resource types — use correct AWS provider naming, e.g. aws_sqs_queue, aws_lambda_function, aws_iam_role, aws_iam_policy, aws_iam_role_policy_attachment, aws_scheduler_schedule, aws_pipes_pipe, aws_cloudwatch_event_api_destination, aws_cloudwatch_event_connection.
+# 4. Naming — do not hardcode resource names; use variables where CloudFormation would use !Sub "${AWS::StackName}-...". Define a "stack_name" variable and reference it as "${var.stack_name}-..." inside "name" fields.
+# 5. References — reference other resources using Terraform interpolation syntax as JSON strings, e.g. "${aws_sqs_queue.my_queue.arn}", never bare ARNs.
+# 6. IAM — use aws_iam_role with a JSON-encoded assume role policy, plus separate aws_iam_policy and aws_iam_role_policy_attachment resources. Never inline broad "*" permissions; scope to specific resource ARNs.
+# 7. Secrets/API keys — mark sensitive variables with "sensitive": true in the variable block.
+# 8. Scheduler — aws_scheduler_schedule requires a "flexible_time_window" block with "mode": "OFF" (as a plain JSON string, not boolean).
+# 9. Outputs — define an "output" block for every major resource created (ARNs, URLs, names).
+# 10. DLQ — always add a dead-letter aws_sqs_queue for source queues, and configure "redrive_policy" with maxReceiveCount: 3 on the source queue.
+# 11. Connection auth — aws_cloudwatch_event_connection auth_parameters must nest api key fields one level deeper under an "api_key" block: "auth_parameters": {"api_key": {"key": "...", "value": "..."}}. Never put "api_key_name"/"api_key_value" directly under auth_parameters.
+# 12. API Destination — aws_cloudwatch_event_api_destination uses flat top-level attributes: "invocation_endpoint", "http_method", "invocation_rate_limit_per_second", "connection_arn". Never nest these inside a "destination_config" block; that block does not exist in this resource's schema.
+# 13. Return only valid JSON — no explanations, no markdown fences, no comments. WRONG: "Here's the Terraform config:\n\n```json\n{...}\n```". CORRECT: response starts directly with "{" and ends with "}".
+# 14. Conversation memory — if the user refers to "the template", "this template", "the one above", "it", or asks to "fix"/"update" without repasting it, modify the most recent Terraform JSON template in conversation history and return the FULL corrected JSON, not a partial diff.
+# 15. EventBridge resource types — the correct resource types are aws_cloudwatch_event_bus and aws_cloudwatch_event_rule. There is no aws_eventbridge_bus or aws_eventbridge_rule resource type in the AWS provider; using either will fail terraform validate entirely. aws_cloudwatch_event_bus does not have a "logging_config" or "cloudwatch_logs_group_arn" attribute — event bus logging in Terraform is configured via a separate aws_cloudwatch_event_bus resource with no built-in logging block; to deliver bus logs to CloudWatch, create the log group and a companion resource policy exactly as in rule 19 below.
+# 16. jsonencode() closing syntax — every ${jsonencode({...})} interpolation must close with three characters in this exact order: the closing brace of the JSON object }, then the closing paren of jsonencode ), then the closing brace of the interpolation }. The full closing sequence is "})}" immediately before the final closing quote. A string ending in ")\"" instead of "})}\"" is missing the interpolation's closing brace and is invalid HCL/JSON — this is a common and easy mistake, so double-check every jsonencode() call in the file before returning it, not just the first one.
+# 17. SQS queue type — Standard queues by default, ALWAYS, for BOTH the source queue AND its DLQ — a redrive relationship requires matching queue types, so if one is Standard the other must be too. Only use "fifo_queue": true and a ".fifo" name suffix on either queue if the user's request contains the literal word "FIFO" or "fifo". Before finalizing output, check every aws_sqs_queue block in the file, including DLQs: if "fifo_queue" appears anywhere and the user's original request did not contain the word "FIFO", remove it and the ".fifo" suffix from that resource.
+# 18. API Destination invocation permission — the IAM action required to invoke an API Destination is events:InvokeApiDestination, scoped to that specific API Destination's ARN. Never use events:PutEvents for this purpose, and never use "Resource": ["*"] on any IAM policy statement in this file — every action must be scoped to the specific ARN of the resource it applies to, matching the "least-privilege" requirement whenever the user requests minimum permissions.
+# 19. CloudWatch Logs resource policy — whenever a Rule or Pipe target writes to a CloudWatch Logs log group, or an Event Bus is configured with logging, include a companion aws_cloudwatch_log_resource_policy resource granting the correct service principal (events.amazonaws.com AND delivery.logs.amazonaws.com, as a list, for Rules/Event Buses; pipes.amazonaws.com for Pipes) permission for logs:CreateLogStream and logs:PutLogEvents on that specific log group's ARN. Follow this exact pattern, copying the bracket structure precisely:
+# "policy_document": "${jsonencode({Version=\"2012-10-17\",Statement=[{Effect=\"Allow\",Principal={Service=[\"events.amazonaws.com\",\"delivery.logs.amazonaws.com\"]},Action=[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],Resource=[\"${aws_cloudwatch_log_group.EXAMPLE.arn}\"]}]})}"
+# Count the closing characters from right to left before returning: the string must end in exactly `]})}"` — one closing bracket for Resource's list, one closing brace for the Statement object, one closing bracket for the Statement list, one closing brace for the jsonencode() object, one closing paren for jsonencode(), one closing brace for the interpolation, then the quote. Omitting this resource policy means logs are silently never delivered even though the resource deploys successfully.
+# 20. aws_cloudwatch_event_bus attributes — the KMS attribute is kms_key_identifier (not kms_key_id — that name belongs to aws_cloudwatch_log_group, a different resource). The logging block is named log_config (not logging_config), containing level and include_execution_data as direct children.
+# 21. aws_pipes_pipe logging — the top-level attribute is log_configuration (not logging_config), containing level and include_execution_data as direct children, PLUS a nested cloudwatch_logs_log_destination block containing log_group_arn. Never place log_group_arn as a flat sibling of level/include_execution_data — it must be nested one level deeper inside cloudwatch_logs_log_destination. Follow this exact shape: "log_configuration": {"level": "ERROR", "include_execution_data": true, "cloudwatch_logs_log_destination": {"log_group_arn": "${aws_cloudwatch_log_group.EXAMPLE.arn}"}}
+# 22. Interpolation syntax — ALWAYS use ${...} (dollar sign + curly braces). NEVER use $(...) (dollar sign + parentheses) anywhere — that is shell syntax, not Terraform, and produces a broken literal string instead of a reference. Scan every string for the exact sequence "$(" and correct it to "${" before returning, especially inside jsonencode() Resource/ARN lists.
+# 23. aws_cloudwatch_event_api_destination — connection_arn is a REQUIRED argument. Every api_destination resource must include "connection_arn": "${aws_cloudwatch_event_connection.<name>.arn}" pointing at a connection defined in the same file. Never create an aws_cloudwatch_event_connection that nothing references.
+# 24. EventBridge Rule with an SQS queue target — the target queue must have a companion aws_sqs_queue_policy resource granting events.amazonaws.com sqs:SendMessage permission, scoped to that queue's ARN — parallel to the CloudWatch Logs resource-policy pattern in rule 19. Omitting it means the rule fires but delivery is silently denied at runtime.
+# """
+
+
+# TERRAFORM_RULES = """
+# You are a Terraform expert assistant.
+
+# OUTPUT FORMAT — READ THIS FIRST: Your entire response must be a single raw JSON object and nothing else. No preamble, no explanation, no markdown fences, no trailing commentary. The first character of your response must be "{" and the last character must be "}".
+# """ + TERRAFORM_RULES_ONLY
+
+
+# def detect_format(query, chat_history=None):
+#     """Detect whether the user wants Terraform JSON or CloudFormation YAML.
+#     Falls back to the format of the last generated template if the request
+#     doesn't mention a format explicitly (e.g. 'fix this')."""
+#     q = query.lower()
+#     if "terraform" in q or "tf.json" in q:
+#         return "terraform_json"
+#     if "cloudformation" in q or "cfn" in q or "yaml" in q or "yml" in q:
+#         return "cloudformation_yaml"
+
+#     if chat_history:
+#         for msg in reversed(chat_history):
+#             if msg.get("role") == "assistant" and msg.get("type") == "template":
+#                 return msg.get("format", "cloudformation_yaml")
+
+#     return "cloudformation_yaml"
+
+
+# from langchain_aws import ChatBedrock
+
+# def get_llm():
+#     session = boto3.Session(profile_name=BEDROCK_PROFILE)
+#     llm = ChatBedrock(
+#         model_id=BEDROCK_MODEL_ID,
+#         region_name=AWS_REGION,
+#         client=session.client("bedrock-runtime", region_name=AWS_REGION),
+#         model_kwargs={"temperature": 0.4, "max_tokens": 4096},
+#     )
+#     print(f"LLM initialized: Bedrock {BEDROCK_MODEL_ID}")
+#     return llm
+
+# def is_template_request(query):
+#     """Detect if the user is asking for a template"""
+#     keywords = [
+#         "generate", "create", "template", "cloudformation",
+#         "yaml", "json", "infrastructure", "iac", "stack",
+#         "write a", "give me a", "make a", "build a",
+#         "fix", "update", "modify", "change", "correct", "edit",
+#         "terraform"
+#     ]
+#     query_lower = query.lower()
+#     return any(keyword in query_lower for keyword in keywords)
+
+
+# def get_last_template(chat_history, fmt=None):
+#     """Find the most recently generated template in chat history.
+#     If fmt is given, only return a template that matches that format,
+#     so a 'fix this' request doesn't inject the wrong format's template."""
+#     for msg in reversed(chat_history):
+#         if msg.get("role") == "assistant" and msg.get("type") == "template" and "template" in msg:
+#             msg_fmt = msg.get("format", "cloudformation_yaml")
+#             if fmt is None or msg_fmt == fmt:
+#                 return msg["template"]
+#     return None
+
+# def _is_short_confirmation(request):
+#     """True if the request is just a bare yes/no reply to the improvement
+#     suggestions prompt, so generate_template can short-circuit it before
+#     retrieval or any LLM call — instead of treating it as a new template
+#     request or a 'fix this' instruction."""
+#     normalized = request.strip().lower().rstrip(".!")
+#     return normalized in {"yes", "no", "y", "n"}
+
+# def _looks_degenerate(text):
+#     """Detect common free-model failure signatures: literal pad tokens,
+#     or the same word repeated many times in a row (a repetition loop)."""
+#     if not text:
+#         return True
+#     if "<pad>" in text:
+#         return True
+#     words = text.split()
+#     if len(words) > 20:
+#         run = 1
+#         for i in range(1, len(words)):
+#             if words[i] == words[i - 1]:
+#                 run += 1
+#                 if run >= 5:
+#                     return True
+#             else:
+#                 run = 1
+#     return False
+
+
+# def _extract_text(content):
+#     """response.content is usually a str, but some providers/LangChain
+#     versions return a list of content blocks instead, e.g.
+#     [{"type": "text", "text": "..."}], sometimes with a separate
+#     reasoning block. Normalize to plain string before any string
+#     method touches it."""
+#     if isinstance(content, str):
+#         return content
+#     if isinstance(content, list):
+#         parts = []
+#         for block in content:
+#             if isinstance(block, str):
+#                 parts.append(block)
+#             elif isinstance(block, dict):
+#                 if block.get("type") in ("reasoning", "thinking"):
+#                     continue
+#                 if "text" in block:
+#                     parts.append(block["text"])
+#         return "".join(parts)
+#     return str(content) if content is not None else ""
+
+
+# def _strip_think_block(content):
+#     content = _extract_text(content)
+#     if not content:
+#         return content
+#     if "<think>" in content:
+#         if "</think>" in content:
+#             content = content.split("</think>", 1)[1]
+#         else:
+#             print("WARNING: <think> block never closed — model likely hit max_tokens while reasoning")
+#             content = content.split("<think>", 1)[0]
+#     return content.strip()
+
+
+# def _strip_fences(content):
+#     """Strip a leading Qwen <think> block, then markdown code fences
+#     regardless of language tag, then fall back to trimming any stray
+#     preamble sentence Qwen adds despite instructions not to."""
+#     cleaned = _strip_think_block(content)
+
+#     for fence in ("```yaml", "```json", "```"):
+#         if cleaned.startswith(fence):
+#             cleaned = cleaned[len(fence):]
+#             break
+#     if cleaned.endswith("```"):
+#         cleaned = cleaned[:-3]
+#     cleaned = cleaned.strip()
+
+#     # Fallback: if there's still a stray preamble line before the real
+#     # content (Qwen occasionally adds one despite instructions), drop
+#     # everything before the first line that looks like real YAML/JSON.
+#     lines = cleaned.split("\n")
+#     for i, line in enumerate(lines):
+#         stripped = line.strip()
+#         if stripped.startswith("{") or re.match(r"^[A-Za-z][\w:.\-]*:", stripped):
+#             if i > 0:
+#                 print(f"WARNING: stripped {i} preamble line(s) before real content")
+#             cleaned = "\n".join(lines[i:])
+#             break
+
+#     return cleaned.strip()
+
+
+# def _quote_colon_in_descriptions(template):
+#     """Nova Lite frequently emits unquoted Description/ConstraintDescription
+#     values containing 'Example: ...' or 'Note: ...' (rule 26), which breaks
+#     YAML parsing entirely ('mapping values are not allowed here') before
+#     cfn-lint or any static check ever runs. Auto-quote any such line that
+#     isn't already quoted, mirroring the other auto-correction regexes below
+#     rather than relying solely on the model to follow rule 26."""
+#     def fix_line(m):
+#         indent, key, value = m.group(1), m.group(2), m.group(3)
+#         value = value.rstrip()
+#         if not value:
+#             return m.group(0)
+#         if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+#             return m.group(0)
+#         if ": " not in value:
+#             return m.group(0)
+#         escaped = value.replace('"', '\\"')
+#         return f'{indent}{key}: "{escaped}"'
+
+#     return re.sub(r'^(\s*)(Description|ConstraintDescription):[ \t]+(.+)$', fix_line, template, flags=re.MULTILINE)
+
+
+
+# def _fix_redrive_policy_casing(template):
+#     """RedrivePolicy is one of the few CloudFormation properties that's a raw
+#     JSON blob mirroring the underlying SQS API directly, rather than a
+#     normal PascalCase-modeled property. Nova Lite consistently emits
+#     PascalCase keys (DeadLetterTargetArn, MaxReceiveCount) here, which
+#     cfn-lint rejects (E3002) even though PascalCase is the norm everywhere
+#     else in the template. Deterministically lowercase these two specific
+#     keys rather than relying on the model to get this inconsistency right."""
+#     template = re.sub(r'\bDeadLetterTargetArn\b', 'deadLetterTargetArn', template)
+#     template = re.sub(r'\bMaxReceiveCount\b', 'maxReceiveCount', template)
+#     return template
+
+
+# def _fix_pipe_sqs_source_parameters(template):
+#     """AWS::Pipes::Pipe SourceParameters for an SQS source must use the key
+#     SqsQueueParameters, never SqsQueue (rule 27's cousin bug — the model
+#     reliably gets the property name wrong here). The batching-window field
+#     inside it is MaximumBatchingWindowInSeconds, never BatchingWindow.
+#     Fix both deterministically rather than depending on repair rounds,
+#     which have proven unreliable for this exact pair of errors."""
+#     template = re.sub(r'^(\s*)SqsQueue:\s*$', r'\1SqsQueueParameters:', template, flags=re.MULTILINE)
+#     template = re.sub(r'^(\s*)BatchingWindow(\s*:)', r'\1MaximumBatchingWindowInSeconds\2', template, flags=re.MULTILINE)
+#     return template
+
+
+# def _strip_unneeded_sub(template):
+#     """Fn::Sub with no ${...} inside is valid CloudFormation but triggers
+#     cfn-lint W1020. Deterministically strip it instead of burning an LLM
+#     repair round on it — this is exactly the harmless case seen when a
+#     static JSON payload (e.g. a Scheduler Target's Input) got wrapped in
+#     !Sub unnecessarily. Only touches multi-line block scalars (!Sub |),
+#     since that's the pattern this has actually occurred in."""
+#     def fix_block(m):
+#         indent, content = m.group(1), m.group(2)
+#         if "${" in content:
+#             return m.group(0)
+#         return f"{indent}|\n{content}"
+#     return re.sub(r'(\s*)!Sub \|\n((?:\1  .*\n?)+)', fix_block, template)
+
+
+# def _validate_cloudformation(template):
+#     """Run cfn-lint against generated YAML. Returns (is_valid, error_text, lint_ran).
+
+#     Uses cfnlint's Python API (cfnlint.api.lint) directly in-process rather than
+#     shelling out via subprocess. This guarantees it runs against the exact same
+#     interpreter/venv that's running Streamlit, with no dependence on PATH or on
+#     which venv happens to be "active" in the shell that launched the app — that
+#     mismatch (two different venv311 folders resolving inconsistently) was the
+#     root cause of validation being silently skipped before.
+#     """
+#     try:
+#         import cfnlint.api as cfnlint_api
+#     except ImportError:
+#         print("WARNING: cfnlint not installed in this interpreter — skipping validation. Run: pip install cfn-lint")
+#         return True, "", False
+
+#     try:
+#         matches = cfnlint_api.lint(template)
+#     except Exception as e:
+#         print(f"WARNING: cfn-lint raised an unexpected error — skipping validation: {e}")
+#         return True, "", False
+
+#     if not matches:
+#         return True, "", True
+
+#     error_text = "\n".join(str(m) for m in matches)
+#     return False, error_text, True
+
+# def _strip_cfn_intrinsic_tags(template):
+#     """yaml.safe_load can't parse short-form CloudFormation intrinsic tags
+#     (!Ref, !GetAtt, !Sub, !Join, !If, !Select, !Split, etc.) without a custom
+#     constructor. Rather than hardcoding an incomplete list — which silently
+#     breaks parsing (and therefore skips ALL downstream static checks: role
+#     mismatch, SCP compliance) whenever Nova Lite uses a tag not in that list —
+#     strip any bare '!Word' tag generically with a regex."""
+#     return re.sub(r'!\w+\b', '', template)
+
+
+# def _extract_logical_id(ref_str):
+#     """Pull the logical ID out of a stripped '!GetAtt Foo.Arn' -> 'Foo.Arn' string
+#     after the yaml.safe_load strip in _check_role_principal_mismatch turned it
+#     into a plain string."""
+#     if isinstance(ref_str, str):
+#         return ref_str.split(".")[0].strip()
+#     return None
+
+
+# def _check_role_principal_mismatch(template):
+#     """Static check: for every 'RoleArn: !GetAtt X.Arn' assignment, find the
+#     role X's AssumeRolePolicyDocument Principal.Service and flag if the
+#     role is reused across resources that imply different assuming services
+#     (Rule targets need events.amazonaws.com; Pipes need pipes.amazonaws.com;
+#     Scheduler needs scheduler.amazonaws.com). Returns a list of warning
+#     strings (empty if none found) to feed into the repair prompt alongside
+#     cfn-lint errors — this catches cross-service role reuse that cfn-lint's
+#     schema validation can't see because it's a semantic/deployment-time
+#     error, not a schema violation."""
+#     import yaml as pyyaml
+#     try:
+#         doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+#     except Exception as e:
+#         print(f"WARNING: role-principal check skipped, template did not parse after tag-stripping: {e}")
+#         return []  # don't block on parse issues; cfn-lint already covers syntax
+
+#     if not isinstance(doc, dict):
+#         return []
+
+#     resources = doc.get("Resources", {}) or {}
+#     role_services = {}
+#     for name, res in resources.items():
+#         if not isinstance(res, dict):
+#             continue
+#         if res.get("Type") == "AWS::IAM::Role":
+#             stmts = res.get("Properties", {}).get("AssumeRolePolicyDocument", {}).get("Statement", [])
+#             if isinstance(stmts, dict):
+#                 stmts = [stmts]
+#             for s in stmts:
+#                 if not isinstance(s, dict):
+#                     continue
+#                 svc = s.get("Principal", {}).get("Service") if isinstance(s.get("Principal"), dict) else None
+#                 if svc:
+#                     role_services[name] = svc if isinstance(svc, list) else [svc]
+
+#     expected_service = {
+#         "AWS::Pipes::Pipe": "pipes.amazonaws.com",
+#         "AWS::Scheduler::Schedule": "scheduler.amazonaws.com",
+#     }
+#     warnings = []
+#     for name, res in resources.items():
+#         if not isinstance(res, dict):
+#             continue
+#         rtype = res.get("Type")
+#         props = res.get("Properties", {}) or {}
+
+#         # Direct RoleArn on Pipe/Scheduler
+#         if rtype in expected_service and "RoleArn" in props:
+#             role_name = _extract_logical_id(props["RoleArn"])
+#             if role_name in role_services and expected_service[rtype] not in role_services[role_name]:
+#                 warnings.append(
+#                     f"{name} ({rtype}) uses RoleArn pointing to {role_name}, whose trust policy allows "
+#                     f"{role_services[role_name]}, not {expected_service[rtype]}. Create a separate Role "
+#                     f"trusted by {expected_service[rtype]} instead of reusing {role_name}."
+#                 )
+
+#         # Rule targets
+#         if rtype == "AWS::Events::Rule":
+#             targets = props.get("Targets", [])
+#             if isinstance(targets, list):
+#                 for t in targets:
+#                     if not isinstance(t, dict):
+#                         continue
+#                     if "RoleArn" in t:
+#                         role_name = _extract_logical_id(t["RoleArn"])
+#                         if role_name in role_services and "events.amazonaws.com" not in role_services[role_name]:
+#                             warnings.append(
+#                                 f"{name} target {t.get('Id')} uses RoleArn pointing to {role_name}, whose trust "
+#                                 f"policy allows {role_services[role_name]}, not events.amazonaws.com. Create a "
+#                                 f"separate Role trusted by events.amazonaws.com instead of reusing {role_name}."
+#                             )
+#     return warnings
+
+
+# def _check_scp_compliance(template):
+#     """Static check mirroring the two account-level SCPs enforced on this
+#     account: (1) an EC2/RDS/ElastiCache instance-size ceiling — only
+#     t*.micro/small/medium/large (db.t*... for RDS, cache.t*.micro for
+#     ElastiCache) are allowed; anything else passes cfn-lint but is denied
+#     at the account level. (2) no Principal may ever be an account root ARN
+#     (arn:aws:iam::*:root) — also denied account-wide regardless of what the
+#     template's own IAM logic intends. Returns a list of warning strings
+#     (empty if none found), fed into the same repair loop as
+#     _check_role_principal_mismatch."""
+#     import yaml as pyyaml
+#     try:
+#         doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+#     except Exception as e:
+#         print(f"WARNING: SCP compliance check skipped, template did not parse after tag-stripping: {e}")
+#         return []
+
+#     if not isinstance(doc, dict):
+#         return []
+
+#     resources = doc.get("Resources", {}) or {}
+#     warnings = []
+
+#     EC2_ALLOWED = ["t*.micro", "t*.small", "t*.medium", "t*.large"]
+#     RDS_ALLOWED = ["db.t*.micro", "db.t*.small", "db.t*.medium", "db.t*.large"]
+#     CACHE_ALLOWED = ["cache.t*.micro"]
+
+#     def wildcard_match(pattern, value):
+#         if not isinstance(value, str):
+#             return False
+#         regex = "^" + re.escape(pattern).replace(r'\*', '.*') + "$"
+#         return bool(re.match(regex, value, re.IGNORECASE))
+
+#     def any_match(patterns, value):
+#         return any(wildcard_match(p, value) for p in patterns)
+
+#     def _principal_is_unsafe(principal_val):
+#         """A Principal is unsafe if it's an account root ARN, or a bare
+#         wildcard ('*' or ['*']) granting public access. Handles the
+#         'AWS' sub-key format (Principal: {AWS: ...}) as well as a bare
+#         Principal: '*' string."""
+#         if isinstance(principal_val, dict):
+#             aws_val = principal_val.get("AWS")
+#             values = aws_val if isinstance(aws_val, list) else [aws_val]
+#         else:
+#             values = [principal_val]
+
+#         for v in values:
+#             if not isinstance(v, str):
+#                 continue
+#             if v.strip() == "*":
+#                 return True
+#             if "root" in v.lower() and "arn:aws:iam" in v.lower():
+#                 return True
+#         return False
+
+#     def _principal_ref_looks_unsafe(ref_name):
+#         """A Principal: {AWS: !Ref X} where X wasn't caught by the direct
+#         ARN/wildcard check might still be a parameterized root-grant bypass —
+#         X's own name or Description strongly implying it's meant to hold a
+#         root ARN at deploy time. Check the Parameter's metadata, not just its
+#         Default (a required parameter has no Default to inspect)."""
+#         if not isinstance(ref_name, str):
+#             return False
+#         param = (doc.get("Parameters", {}) or {}).get(ref_name)
+#         if not isinstance(param, dict):
+#             return False
+#         haystack = (ref_name + " " + str(param.get("Description", ""))).lower()
+#         return "root" in haystack and ("arn:aws:iam" in haystack or "account root" in haystack)
+
+#     def find_root_principal(obj):
+#         found = False
+#         if isinstance(obj, dict):
+#             for k, v in obj.items():
+#                 if k == "Principal":
+#                     if _principal_is_unsafe(v):
+#                         found = True
+#                     aws_val = v.get("AWS") if isinstance(v, dict) else v
+#                     ref_candidates = aws_val if isinstance(aws_val, list) else [aws_val]
+#                     for rc in ref_candidates:
+#                         if _principal_ref_looks_unsafe(rc):
+#                             found = True
+#                 if find_root_principal(v):
+#                     found = True
+#         elif isinstance(obj, list):
+#             for item in obj:
+#                 if find_root_principal(item):
+#                     found = True
+#         return found
+
+#     def find_root_principal_in_parameter_defaults(res_name, res):
+#         """Catches the parameter-indirection bypass: a PolicyDocument
+#         that isn't inline but is instead '!Ref SomeParameter', where
+#         that parameter's Default value is a JSON string containing an
+#         unsafe Principal. After tag-stripping, '!Ref SomeParameter'
+#         becomes the bare string 'SomeParameter' in the parsed doc."""
+#         props = res.get("Properties", {}) or {}
+#         policy_doc = props.get("PolicyDocument")
+#         if not isinstance(policy_doc, str):
+#             return None
+
+#         param = (doc.get("Parameters", {}) or {}).get(policy_doc)
+#         if not isinstance(param, dict):
+#             return None
+
+#         default_val = param.get("Default")
+#         if not isinstance(default_val, str):
+#             return None
+
+#         try:
+#             parsed = json.loads(default_val)
+#         except (json.JSONDecodeError, TypeError):
+#             return None
+
+#         if find_root_principal(parsed):
+#             return (
+#                 f"{res_name} references PolicyDocument: !Ref {policy_doc}, and that parameter's "
+#                 f"Default value contains a policy with an unsafe Principal (root ARN or wildcard '*'). "
+#                 f"Moving the policy into a parameter does not exempt it from the account SCP — inline "
+#                 f"the PolicyDocument directly on the resource with a scoped, non-wildcard Principal instead."
+#             )
+#         return None
+
+#     def _resolve_param_values(value):
+#         """After tag-stripping, '!Ref X' becomes the bare string 'X'. If X is
+#         actually a Parameter's logical ID, resolve to what that parameter can
+#         really be (its AllowedValues, or its Default) instead of treating the
+#         parameter's own name as the value — otherwise every !Ref'd
+#         InstanceType/DBInstanceClass/CacheNodeType false-positives here.
+#         Returns None if the parameter is required with no Default/AllowedValues
+#         (can't be verified statically — better to skip than false-positive)."""
+#         if not isinstance(value, str):
+#             return [value]
+#         params = doc.get("Parameters", {}) or {}
+#         param = params.get(value)
+#         if not isinstance(param, dict):
+#             return [value]
+#         allowed = param.get("AllowedValues")
+#         if isinstance(allowed, list) and allowed:
+#             return allowed
+#         default = param.get("Default")
+#         if default is not None:
+#             return [default]
+#         return None
+
+#     for name, res in resources.items():
+#         if not isinstance(res, dict):
+#             continue
+#         rtype = res.get("Type")
+#         props = res.get("Properties", {}) or {}
+
+#         if rtype in ("AWS::EC2::Instance", "AWS::AutoScaling::LaunchConfiguration", "AWS::EC2::LaunchTemplate"):
+#             itype = props.get("InstanceType")
+#             if itype is None and rtype == "AWS::EC2::LaunchTemplate":
+#                 itype = props.get("LaunchTemplateData", {}).get("InstanceType")
+#             if itype:
+#                 candidates = _resolve_param_values(itype)
+#                 if candidates is not None:
+#                     bad = [v for v in candidates if not any_match(EC2_ALLOWED, v)]
+#                     if bad:
+#                         warnings.append(
+#                             f"{name} ({rtype}) InstanceType resolves to {bad}, which violates the account SCP "
+#                             f"restricting EC2 instances to t*.micro/small/medium/large only. This passes cfn-lint "
+#                             f"but is DENIED at deploy time — use one of the allowed sizes instead."
+#                         )
+
+#         if rtype == "AWS::RDS::DBInstance":
+#             dclass = props.get("DBInstanceClass")
+#             if dclass:
+#                 candidates = _resolve_param_values(dclass)
+#                 if candidates is not None:
+#                     bad = [v for v in candidates if not any_match(RDS_ALLOWED, v)]
+#                     if bad:
+#                         warnings.append(
+#                             f"{name} (AWS::RDS::DBInstance) DBInstanceClass resolves to {bad}, which violates the "
+#                             f"account SCP restricting RDS instances to db.t*.micro/small/medium/large only. This "
+#                             f"passes cfn-lint but is DENIED at deploy time — use one of the allowed sizes instead."
+#                         )
+
+#         if rtype in ("AWS::ElastiCache::CacheCluster", "AWS::ElastiCache::ReplicationGroup"):
+#             ntype = props.get("CacheNodeType")
+#             if ntype:
+#                 candidates = _resolve_param_values(ntype)
+#                 if candidates is not None:
+#                     bad = [v for v in candidates if not any_match(CACHE_ALLOWED, v)]
+#                     if bad:
+#                         warnings.append(
+#                             f"{name} ({rtype}) CacheNodeType resolves to {bad}, which violates the account SCP "
+#                             f"restricting ElastiCache nodes to cache.t*.micro only. This passes cfn-lint but is "
+#                             f"DENIED at deploy time — use cache.t*.micro instead."
+#                         )
+
+#         if find_root_principal(res):
+#             warnings.append(
+#                 f"{name} ({rtype}) has a Principal referencing the account root ARN (arn:aws:iam::*:root) "
+#                 f"or a public wildcard ('*'). The account SCP denies unrestricted root/public access "
+#                 f"unconditionally — remove this and use a specific service or IAM role/user principal instead."
+#             )
+
+#         param_warning = find_root_principal_in_parameter_defaults(name, res)
+#         if param_warning:
+#             warnings.append(param_warning)
+
+#     return warnings
+
+
+# def _check_dlq_redrive_direction(template):
+#     """Static check for a recurring, confirmed-twice bug: Nova Lite puts
+#     RedrivePolicy on the DLQ itself (pointing back at the main queue) instead
+#     of on the main/source queue (pointing at the DLQ) — backwards. Also
+#     catches the companion bug: deadLetterTargetArn using !Ref (returns the
+#     queue URL) instead of !GetAtt <Id>.Arn (returns the ARN) — schema-valid,
+#     so cfn-lint never flags it, but semantically wrong at deploy time.
+#     A queue is inferred to be a DLQ if its logical ID or QueueName contains
+#     'DLQ' or 'DeadLetter' (case-insensitive) — same heuristic a human reader
+#     would use, since CloudFormation has no formal DLQ resource type."""
+#     import yaml as pyyaml
+#     try:
+#         doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+#     except Exception as e:
+#         print(f"WARNING: DLQ redrive-direction check skipped, template did not parse: {e}")
+#         return []
+
+#     if not isinstance(doc, dict):
+#         return []
+
+#     resources = doc.get("Resources", {}) or {}
+#     warnings = []
+
+#     def looks_like_dlq(logical_id, res):
+#         name_field = str((res.get("Properties", {}) or {}).get("QueueName", ""))
+#         haystack = (logical_id + " " + name_field).lower()
+#         return "dlq" in haystack or "deadletter" in haystack or "dead-letter" in haystack
+
+#     def extract_target_id(deadletter_val, raw_template):
+#         """After tag-stripping, both !Ref X and !GetAtt X.Arn collapse to
+#         bare strings — 'X' and 'X.Arn' respectively. Re-check the RAW
+#         (untouched) template text to tell which tag was actually used,
+#         since that distinction is exactly what we need to flag."""
+#         if not isinstance(deadletter_val, str):
+#             return None, None
+#         target_id = deadletter_val.split(".")[0].strip()
+#         ref_pattern = re.search(rf'!Ref\s+{re.escape(target_id)}\b', raw_template)
+#         getatt_arn_pattern = re.search(rf'!GetAtt\s+{re.escape(target_id)}\.Arn\b', raw_template)
+#         if getatt_arn_pattern:
+#             return target_id, "GetAtt.Arn"
+#         if ref_pattern:
+#             return target_id, "Ref"
+#         return target_id, "unknown"
+
+#     for name, res in resources.items():
+#         if not isinstance(res, dict) or res.get("Type") != "AWS::SQS::Queue":
+#             continue
+#         props = res.get("Properties", {}) or {}
+#         redrive = props.get("RedrivePolicy")
+#         if not isinstance(redrive, dict):
+#             continue
+
+#         target_id, ref_style = extract_target_id(redrive.get("deadLetterTargetArn"), template)
+
+#         if looks_like_dlq(name, res):
+#             warnings.append(
+#                 f"{name} appears to be a Dead Letter Queue (based on its name), but it has its own "
+#                 f"RedrivePolicy pointing at {target_id or 'another queue'}. RedrivePolicy belongs on the "
+#                 f"SOURCE/main queue (pointing at the DLQ), not on the DLQ itself. Remove RedrivePolicy from "
+#                 f"{name} entirely, and instead add it to the main queue that should redrive INTO {name}."
+#             )
+#         elif ref_style == "Ref":
+#             warnings.append(
+#                 f"{name}'s RedrivePolicy.deadLetterTargetArn uses !Ref {target_id}, which returns the queue "
+#                 f"URL, not its ARN. deadLetterTargetArn requires an ARN — change this to "
+#                 f"!GetAtt {target_id}.Arn instead. This is schema-valid so cfn-lint will not catch it, but it "
+#                 f"silently misconfigures the redrive at deploy time."
+#             )
+
+#     return warnings
+
+
+# def _check_invalid_parameter_defaults(template):
+#     """CloudFormation Parameters.*.Default must be a literal scalar — no
+#     intrinsic functions (!Sub, !Ref, !GetAtt, etc.) allowed. Nova Lite has
+#     emitted Default: !Sub "${AWS::StackName}-bucket" (fails cfn-lint E2001
+#     + two W1030s) — catch it on raw template text before tag-stripping so
+#     it feeds into the same repair loop as SCP/role checks."""
+#     warnings = []
+#     in_parameters = False
+#     current_param = None
+#     for line in template.split("\n"):
+#         if re.match(r'^Parameters:\s*$', line):
+#             in_parameters = True
+#             continue
+#         if in_parameters and re.match(r'^[A-Za-z]', line):
+#             in_parameters = False
+#         if not in_parameters:
+#             continue
+#         m_param = re.match(r'^  ([A-Za-z0-9]+):\s*$', line)
+#         if m_param:
+#             current_param = m_param.group(1)
+#             continue
+#         m_default = re.match(r'^\s*Default:\s*(!\w+\b.*)$', line)
+#         if m_default and current_param:
+#             warnings.append(
+#                 f"Parameter {current_param} has Default: {m_default.group(1).strip()}, which uses an "
+#                 f"intrinsic function. Parameters.Default only accepts a literal string/number — never "
+#                 f"!Sub, !Ref, !GetAtt, or any other tag. Remove the Default line (or use a literal value) "
+#                 f"and apply the intrinsic function directly on the resource property that needs it instead."
+#             )
+#     return warnings
+
+# def _review_template_for_improvements(llm, template, request, fmt, rules_only, prior_suggestions=None, current_scp_warnings=None):
+#     """..."""
+#     fence_lang = "json" if fmt == "terraform_json" else "yaml"
+#     prior_suggestions = prior_suggestions or []
+#     current_scp_warnings = current_scp_warnings or []
+#     scp_flagged_ids = set()
+#     for w in current_scp_warnings:
+#         m = re.match(r"^([A-Za-z0-9]+)\s*\(", w)
+#         if m:
+#             scp_flagged_ids.add(m.group(1))
+
+#     prior_block = ""
+#     if prior_suggestions:
+#         prior_list = "\n".join(f"- {s}" for s in prior_suggestions)
+#         prior_block = f"""
+# The PREVIOUS version of this template (before this turn's fix) had these flagged issues:
+# {prior_list}
+
+# If this turn's request addressed any of these, they are now RESOLVED — do not re-flag them unless you can point to the exact line in the CURRENT template below proving the issue still exists.
+# """
+
+#     review_prompt = f"""You are reviewing a {("Terraform JSON" if fmt == "terraform_json" else "CloudFormation")} template you just generated...
+
+# {prior_block}
+
+# Original request:
+# {request}
+
+# Generated template:
+# ```{fence_lang}
+# {template}
+# ```
+
+# Reference schema rules:
+# {rules_only}
+
+# ... [existing HARD RULES block unchanged] ...
+
+# NEW HARD RULE — EVIDENCE REQUIRED: for every suggestion, you must first locate the specific resource/property in the CURRENT template text above that is missing or wrong. If you cannot point to a specific logical ID and property name that is absent or incorrect in the CURRENT template, do not include the suggestion. Never flag something based on memory of an earlier version.
+
+# Rules for your answer:
+# - If you find nothing worth flagging, respond with exactly: NONE
+# - Otherwise, respond with a bullet list of AT MOST 5 items. Each item must be in this exact format:
+#   - [LogicalId] issue description (at least 10 words)
+# - Output nothing except NONE or the bullet list."""
+
+#     try:
+#         response = llm.invoke([HumanMessage(content=review_prompt)], temperature=0.1)
+#         content = _strip_think_block(response.content)
+#     except Exception as e:
+#         print(f"WARNING: improvement review call failed, skipping: {e}")
+#         return []
+
+#     content = content.strip()
+#     if _looks_degenerate(content):
+#         print("WARNING: degenerate output detected in improvement review, skipping suggestions.")
+#         return []
+#     if not content or content.upper().startswith("NONE"):
+#         return []
+
+#     suggestions = []
+#     for line in content.split("\n"):
+#         if line.startswith("- "):
+#             text = line[2:].strip()
+#         elif line.startswith("-"):
+#             text = line[1:].strip()
+#             text = text.lstrip("- ").strip()
+#         else:
+#             continue
+
+#         text = re.sub(r'^[-\s]+', '', text)   # <-- ADD THIS LINE — strips any leftover leading dash(es)/space(s), e.g. from "- - [Id] ..." model output
+
+#         if len(text.split()) < 8:
+#             print(f"WARNING: discarding suspiciously short 'suggestion': {text!r}")
+#             continue
+#         if text in template:
+#             print(f"WARNING: discarding suggestion that's verbatim template text: {text!r}")
+#             continue
+#         quoted_spans = re.findall(r'`([^`]+)`', text)
+#         intrinsic_spans = re.findall(r'(![A-Za-z]+(?:\s+[\w\.]+)+)', text)
+#         all_spans = quoted_spans + intrinsic_spans
+#         if len(all_spans) >= 2 and len(set(all_spans)) < len(all_spans):
+#             print(f"WARNING: discarding suggestion with duplicate identical spans: {text!r}")
+#             continue
+
+#         # NEW: extract [LogicalId] tag and verify it actually exists in the template
+#         m = re.match(r"^\[([A-Za-z0-9]+)\]\s*(.+)$", text)
+#         if not m:
+#             print(f"WARNING: discarding untagged suggestion (missing [LogicalId]): {text!r}")
+#             continue
+#         logical_id, desc = m.group(1), m.group(2)
+#         resource_ids = set(re.findall(r'^  ([A-Za-z0-9]+):\s*$', template, flags=re.MULTILINE))
+#         if not resource_ids:
+#             resource_ids = set(re.findall(r'^\s{2}([A-Za-z0-9]+):\n\s{4}Type:', template, flags=re.MULTILINE))
+#         if logical_id not in resource_ids:
+#             print(f"WARNING: discarding suggestion referencing '{logical_id}', which is not an actual Resources logical ID in this template: {text!r}")
+#             continue
+#         text = desc # drop the tag for display
+#         # NEW: cross-check root/wildcard-principal claims against the actual
+#         # static SCP check — Nova Lite has flagged stale template Description
+#         # text as if it were the current Principal value. Trust the static
+#         # check over the model's own claim.
+#         if "root" in text.lower() and logical_id not in scp_flagged_ids:
+#             print(f"WARNING: discarding suggestion claiming root-principal issue for {logical_id}, which the static SCP check found compliant: {text!r}")
+#             continue
+
+#         # NEW: programmatic dedup against prior turn's suggestions
+#         if _is_stale_suggestion(text, prior_suggestions):
+#             print(f"WARNING: discarding stale/repeated suggestion: {text!r}")
+#             continue
+
+#         # NEW: discard suggestions that just echo the user's own fix request —
+#         # a sign the model is repeating the problem statement instead of
+#         # verifying whether the fix actually landed
+#         if _is_stale_suggestion(text, [request]):
+#             print(f"WARNING: discarding suggestion that echoes the user's own fix request: {text!r}")
+#             continue
+
+#         suggestions.append(text)
+
+#     return suggestions[:5]
+
+
+# def _is_stale_suggestion(new_text, prior_suggestions, threshold=0.6):
+#     new_words = set(re.sub(r'[^\w\s]', '', new_text.lower()).split())
+#     for prior in prior_suggestions:
+#         prior_words = set(re.sub(r'[^\w\s]', '', prior.lower()).split())
+#         if not new_words:
+#             continue
+#         overlap = len(new_words & prior_words) / len(new_words)
+#         if overlap > threshold:
+#             return True
+#     return False
+
+# def _generate_with_retry(llm, messages, fmt, max_retries=2):
+#     """Call the LLM, detect degenerate output (pad tokens, repetition
+#     loops, invalid JSON for the terraform_json format), and retry cleanly
+#     instead of returning garbage to the user."""
+#     last_content = ""
+#     for attempt in range(max_retries + 1):
+#         response = llm.invoke(messages)
+#         # Strip the <think> block before any downstream checks so we're
+#         # scanning the actual answer, not the model's reasoning trace.
+#         content = _strip_think_block(response.content)
+#         print(f"Attempt {attempt + 1} — raw response: {content[:300]}")
+
+#         if _looks_degenerate(content):
+#             print(f"WARNING: degenerate output detected on attempt {attempt + 1}, retrying...")
+#             last_content = content
+#             continue
+
+#         if fmt == "terraform_json":
+#             cleaned = _strip_fences(content)
+#             try:
+#                 json.loads(cleaned)
+#             except json.JSONDecodeError:
+#                 print(f"WARNING: invalid JSON on attempt {attempt + 1}, retrying...")
+#                 last_content = content
+#                 continue
+
+#         return content
+
+#     print("All retries produced bad output — returning last attempt as-is.")
+#     return last_content
+
+
+# def generate_template(request, embeddings, chat_history=None):
+#     """Main template generation function. Supports both CloudFormation YAML
+#     and Terraform JSON output, auto-detected from the request or from the
+#     format of the last template in the conversation. Also supports
+#     conversation memory so users can say 'fix this' or 'update the template'
+#     without repasting it, and automatically retries if the model produces
+#     degenerate output (common on free-tier models under load). CloudFormation
+#     output additionally goes through a cfn-lint validation pass, a static
+#     role/trust-policy cross-check, and an LLM repair pass to catch
+#     hallucinated/invalid resource properties and cross-service role reuse
+#     before returning.
+
+#     Also short-circuits bare 'yes'/'no' confirmation replies (answers to the
+#     improvement-suggestion prompt) so they never reach retrieval or the LLM —
+#     see _is_short_confirmation."""
+#     try:
+#         print(f"\nTemplate request: {request}")
+#         print(f"DEBUG: template_chain.py loaded from {__file__}")
+
+#         if chat_history is None:
+#             chat_history = []
+
+#         fmt = detect_format(request, chat_history)
+#         print(f"Detected format: {fmt}")
+
+#         # Short-circuit bare yes/no confirmations before any retrieval or
+#         # LLM call. "no" returns the last template completely untouched.
+#         # "yes" is not yet wired up — see the TODO below; it currently
+#         # falls through to ValueError rather than silently regenerating.
+#         if _is_short_confirmation(request):
+#             last_template = get_last_template(chat_history, fmt=fmt)
+#             if last_template is None:
+#                 raise ValueError("Got a yes/no reply but no prior template found in chat_history.")
+
+#             normalized = request.strip().lower().rstrip(".!")
+#             if normalized in ("no", "n"):
+#                 print("User declined suggestions — returning last template unchanged, no LLM call.")
+#                 return {
+#                     "request": request,
+#                     "template": last_template,
+#                     "format": fmt,
+#                     "sources": [],
+#                     "chunks": [],
+#                     "suggestions": []
+#                 }
+#             else:
+#                 # TODO: "yes" path — needs the persisted suggestion strings
+#                 # from the prior turn (see chat_history storage fix) before
+#                 # this can safely target only those changes. Do not let this
+#                 # fall through to full regeneration in the meantime.
+#                 raise NotImplementedError(
+#                     "The 'yes' confirmation path isn't wired up yet — "
+#                     "needs persisted suggestions from chat_history."
+#                 )
+
+#         # Retrieve relevant sample templates
+#         print("Retrieving relevant sample templates...")
+#         chunks, context = retrieve_and_format(request, embeddings)
+
+#         # Initialize LLM
+#         llm = get_llm()
+
+#         # Build messages: system rules first (format-specific ruleset)
+#         rules = TERRAFORM_RULES if fmt == "terraform_json" else CLOUDFORMATION_RULES
+#         rules_only = TERRAFORM_RULES_ONLY if fmt == "terraform_json" else CLOUDFORMATION_RULES_ONLY
+#         messages = [SystemMessage(content=rules)]
+
+#         # Add recent conversation history so the model has context
+#         # (skip giant template code blocks except the most recent one, to save tokens)
+#         last_template = get_last_template(chat_history, fmt=fmt)
+
+#         for msg in chat_history[-10:]:
+#             if msg["role"] == "user":
+#                 messages.append(HumanMessage(content=msg["content"]))
+#             elif msg["role"] == "assistant":
+#                 if msg.get("type") == "template":
+#                     msg_fmt_label = "Terraform JSON" if msg.get("format") == "terraform_json" else "CloudFormation"
+#                     messages.append(AIMessage(content=f"[Generated a {msg_fmt_label} template - see below for latest version]"))
+#                 else:
+#                     messages.append(AIMessage(content=msg.get("content", "")))
+
+#         fence_lang = "json" if fmt == "terraform_json" else "yaml"
+#         format_label = "Terraform JSON (.tf.json)" if fmt == "terraform_json" else "CloudFormation"
+
+#         if fmt == "terraform_json":
+#             critical_reminders = """- flexible_time_window.mode must be the plain string "OFF", not a boolean
+# - All resource references must use "${resource_type.name.attribute}" interpolation syntax
+# - Sensitive variables (API keys, tokens) must have "sensitive": true
+# - aws_cloudwatch_event_connection auth_parameters must nest under "api_key": {"key": ..., "value": ...}
+# - aws_cloudwatch_event_api_destination uses flat invocation_endpoint/http_method/invocation_rate_limit_per_second — no destination_config block
+# - Output must be a single valid JSON object with no trailing commas or comments"""
+#         else:
+#             critical_reminders = """- FlexibleTimeWindow Mode must be written as Mode: "OFF" with quotes, never Mode: OFF
+# - All YAML reserved words (OFF, ON, YES, NO, TRUE, FALSE) must be quoted when used as strings
+# - All parameters without defaults must have descriptions with examples
+# - ApiKeyValue must never be empty
+# - Never use AWS::IAM::PolicyAttachment
+# - Never reuse one IAM Role's RoleArn across two resources that need different trust-policy principals (e.g. a pipes.amazonaws.com-trusted role must never be used as a Rule target's RoleArn)"""
+
+#         if last_template:
+#             messages.append(HumanMessage(content=f"""For reference, here is the most recently generated/discussed {format_label} template:
+
+# ```{fence_lang}
+# {last_template}
+# ```
+
+# Sample templates for additional reference:
+# {context}
+
+# New request: {request}
+
+# If this request asks to fix, update, or modify "the template", apply the changes to the template shown above and return the COMPLETE corrected template, not a partial diff.
+
+# Critical reminders before you output:
+# {critical_reminders}
+
+# Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template" or any other sentence before or after it. Begin your response with the first line of the {fence_lang.upper()} itself:"""))
+#         else:
+#             messages.append(HumanMessage(content=f"""Generate a {format_label} template for the following request.
+# Use the sample templates below as reference for patterns and structure.
+
+# Sample templates for reference:
+# {context}
+
+# Request: {request}
+
+# Critical reminders before you output:
+# {critical_reminders}
+
+# Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template" or any other sentence before or after it. Begin your response with the first line of the {fence_lang.upper()} itself:"""))
+
+#         print("Generating template...")
+#         raw_content = _generate_with_retry(llm, messages, fmt, max_retries=1)
+#         print(f"Final raw response: {raw_content[:500]}")
+
+#         template = _strip_fences(raw_content)
+
+#         if fmt == "terraform_json":
+#             try:
+#                 json.loads(template)
+#             except json.JSONDecodeError as je:
+#                 print(f"WARNING: generated Terraform JSON did not parse cleanly: {je}")
+#         else:
+#             template = re.sub(r'(Mode:\s+)(OFF|ON|YES|NO)(\s*$)', r'\1"\2"\3', template, flags=re.MULTILINE)
+#             template = re.sub(r'^(\s*)queryStringParameters(\s*:)', r'\1QueryStringParameters\2', template, flags=re.MULTILINE | re.IGNORECASE)
+#             template = _quote_colon_in_descriptions(template)
+#             template = re.sub(r'(Mode:\s+)(OFF|ON|YES|NO)(\s*$)', r'\1"\2"\3', template, flags=re.MULTILINE)
+#             template = re.sub(r'^(\s*)queryStringParameters(\s*:)', r'\1QueryStringParameters\2', template, flags=re.MULTILINE | re.IGNORECASE)
+#             template = _quote_colon_in_descriptions(template)
+#             template = _strip_unneeded_sub(template)          # <-- ADD THIS LINE
+#             template = _fix_redrive_policy_casing(template)
+#             template = _fix_pipe_sqs_source_parameters(template)
+#             template = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', template, flags=re.MULTILINE)
+#             template = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', template)
+#             template = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', template, flags=re.MULTILINE)
+#             print(f"DEBUG: after colon-fix, sample line check: {[l for l in template.split(chr(10)) if ':!' in l][:3]}")
+
+#             is_valid, lint_errors, lint_ran = _validate_cloudformation(template)
+#             # Nova Lite also sometimes omits the space between a key's colon and
+#             # Nova Lite also sometimes omits the space between a key's colon and
+#             # a quoted scalar value entirely, e.g. ConstraintDescription:'must be...'
+#             # or KeyName:'my-key-pair' — invalid YAML, breaks parsing before any
+#             # validation can run. Insert the missing space.
+#             template = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', template, flags=re.MULTILINE)
+#             # Nova Lite consistently omits the space between ":" and an intrinsic
+# # function tag (e.g. "Key:!Sub" instead of "Key: !Sub"), which is
+# # invalid YAML and breaks cfn-lint parsing entirely.
+#             template = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', template)
+#             template = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', template, flags=re.MULTILINE)
+#             print(f"DEBUG: after colon-fix, sample line check: {[l for l in template.split(chr(10)) if ':!' in l][:3]}")
+
+#             is_valid, lint_errors, lint_ran = _validate_cloudformation(template)
+#             role_warnings = _check_role_principal_mismatch(template)
+#             scp_warnings = _check_scp_compliance(template)
+#             param_default_warnings = _check_invalid_parameter_defaults(template)
+#             dlq_warnings = _check_dlq_redrive_direction(template)
+
+#             if not lint_ran:
+#                 print("cfn-lint validation SKIPPED (module not found in this interpreter) — output is unverified.")
+#             if role_warnings:
+#                 print(f"Role/trust-policy mismatch(es) found:\n" + "\n".join(role_warnings))
+#             if scp_warnings:
+#                 print(f"SCP compliance violation(s) found:\n" + "\n".join(scp_warnings))
+#             if dlq_warnings:
+#                 print(f"DLQ redrive-direction issue(s) found:\n" + "\n".join(dlq_warnings))
+
+#             needs_repair = (lint_ran and not is_valid) or bool(role_warnings) or bool(scp_warnings) or bool(param_default_warnings) or bool(dlq_warnings)
+#             repair_status = "not_needed"
+
+#             if needs_repair:
+#                 current_lint_errors = lint_errors if (lint_ran and not is_valid) else ""
+#                 current_role_warnings = role_warnings
+#                 current_scp_warnings = scp_warnings
+#                 current_param_warnings = param_default_warnings
+#                 current_dlq_warnings = dlq_warnings
+#                 max_repair_rounds = 2
+
+#                 for attempt in range(max_repair_rounds):
+#                     combined_errors = current_lint_errors
+#                     if current_role_warnings:
+#                         combined_errors += (
+#                             "\n\nAdditional issues found by static analysis (role/trust-policy mismatches — "
+#                             "these will NOT show up in cfn-lint but WILL fail at deploy/runtime):\n"
+#                             + "\n".join(f"- {w}" for w in current_role_warnings)
+#                         )
+#                     if current_scp_warnings:
+#                         combined_errors += (
+#                             "\n\nAdditional issues found by static analysis (account SCP violations — "
+#                             "these will NOT show up in cfn-lint but WILL be DENIED at deploy time):\n"
+#                             + "\n".join(f"- {w}" for w in current_scp_warnings)
+#                         )
+#                     if current_param_warnings:
+#                         combined_errors += (
+#                             "\n\nAdditional issues found by static analysis (invalid Parameter.Default values — "
+#                             "cfn-lint will reject these, not just a deploy-time denial):\n"
+#                             + "\n".join(f"- {w}" for w in current_param_warnings)
+#                         )
+#                     if current_dlq_warnings:
+#                         combined_errors += (
+#                             "\n\nAdditional issues found by static analysis (DLQ RedrivePolicy misconfiguration — "
+#                             "will NOT show up in cfn-lint but silently breaks message redrive at runtime):\n"
+#                             + "\n".join(f"- {w}" for w in current_dlq_warnings)
+#                         )
+
+#                     print(f"Repair attempt {attempt + 1}/{max_repair_rounds} for the following issues:\n{combined_errors}")
+#                     repair_messages = messages + [
+#                         AIMessage(content=template),
+#                         HumanMessage(content=f"""The template above has the following issues:
+
+# {combined_errors}
+
+# Return the COMPLETE corrected template with these issues fixed. Output ONLY the YAML content, no explanation.""")
+#                     ]
+#                     repaired = _generate_with_retry(llm, repair_messages, fmt, max_retries=1)
+#                     repaired = _strip_fences(repaired)
+#                     repaired = _quote_colon_in_descriptions(repaired)
+#                     repaired = _generate_with_retry(llm, repair_messages, fmt, max_retries=1)
+#                     repaired = _strip_fences(repaired)
+#                     repaired = _quote_colon_in_descriptions(repaired)
+#                     repaired = _strip_unneeded_sub(repaired)          # <-- ADD THIS LINE
+#                     repaired = _fix_redrive_policy_casing(repaired)
+#                     repaired = _fix_pipe_sqs_source_parameters(repaired)
+#                     repaired = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', repaired, flags=re.MULTILINE)
+#                     repaired = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', repaired)
+#                     repaired = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', repaired, flags=re.MULTILINE)
+
+#                     repair_unchanged = repaired.strip() == template.strip()
+#                     if repair_unchanged:
+#                         print(f"WARNING: repair attempt {attempt + 1} returned an unchanged template — the model did not apply any fix.")
+
+#                     template = repaired
+
+#                     still_valid, remaining_errors, repair_lint_ran = _validate_cloudformation(template)
+#                     remaining_role_warnings = _check_role_principal_mismatch(template)
+#                     remaining_scp_warnings = _check_scp_compliance(template)
+#                     remaining_param_warnings = _check_invalid_parameter_defaults(template)
+#                     remaining_dlq_warnings = _check_dlq_redrive_direction(template)
+
+#                     if not repair_lint_ran:
+#                         print(f"cfn-lint validation SKIPPED on repair attempt {attempt + 1} — treating as unverified.")
+#                         repair_status = "lint_skipped"
+#                         break
+
+#                     if still_valid and not remaining_role_warnings and not remaining_scp_warnings and not remaining_param_warnings and not remaining_dlq_warnings:
+#                         print(f"Repair attempt {attempt + 1} succeeded — cfn-lint clean, no static-check warnings.")
+#                         repair_status = "unchanged_after_repair" if repair_unchanged else "repaired_clean"
+#                         break
+
+#                     current_lint_errors = remaining_errors if not still_valid else ""
+#                     current_role_warnings = remaining_role_warnings
+#                     current_scp_warnings = remaining_scp_warnings
+#                     current_param_warnings = remaining_param_warnings
+#                     current_dlq_warnings = remaining_dlq_warnings
+
+#                     if repair_unchanged:
+#                         print("Repair made no changes — further rounds unlikely to help, stopping early.")
+#                         repair_status = "repair_failed"
+#                         break
+
+#                     if attempt == max_repair_rounds - 1:
+#                         if not still_valid:
+#                             print(f"WARNING: repair pass still has cfn-lint errors after {max_repair_rounds} attempts, returning best attempt:\n{remaining_errors}")
+#                         if remaining_role_warnings:
+#                             print("WARNING: still has role/trust-policy mismatches, returning best attempt:\n" + "\n".join(remaining_role_warnings))
+#                         if remaining_scp_warnings:
+#                             print("WARNING: still has SCP violations, returning best attempt:\n" + "\n".join(remaining_scp_warnings))
+#                         if remaining_param_warnings:
+#                             print("WARNING: still has invalid Parameter.Default values, returning best attempt:\n" + "\n".join(remaining_param_warnings))
+#                         if remaining_dlq_warnings:
+#                             print("WARNING: still has DLQ redrive-direction issues, returning best attempt:\n" + "\n".join(remaining_dlq_warnings))
+#                         repair_status = "repair_failed"
+#             else:
+#                 print("cfn-lint passed, no role/trust-policy mismatches, SCP-compliant — no repair needed.")
+
+#         sources = list(set([
+#             chunk.metadata.get("source_file", "unknown")
+#             for chunk in chunks
+#         ]))
+
+#         prior_suggestions = []
+#         for msg in reversed(chat_history):
+#             if msg.get("role") == "assistant" and msg.get("type") == "template":
+#                 prior_suggestions = msg.get("suggestions", [])
+#                 break
+
+#         final_scp_warnings = _check_scp_compliance(template)
+#         suggestions = _review_template_for_improvements(llm, template, request, fmt, rules_only, prior_suggestions, final_scp_warnings)
+#         if suggestions:
+#             print(f"Improvement suggestions found: {suggestions}")
+#         else:
+#             print("No improvement suggestions — template looks complete.")
+
+#         print("Template generated successfully")
+#         print(f"Sources used: {sources}")
+
+#         return {
+#             "request": request,
+#             "template": template,
+#             "format": fmt,
+#             "sources": sources,
+#             "chunks": chunks,
+#             "suggestions": suggestions,
+#             "repair_status": repair_status
+#         }
+
+#     except Exception as e:
+#         print(f"Error generating template: {e}")
+#         raise
+
+
+import re
+import json
+import boto3
+from langchain_aws import ChatBedrock
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from config.config import BEDROCK_MODEL_ID, AWS_REGION, BEDROCK_PROFILE
+from retrieval.retriever import retrieve_and_format
+
+KNOWN_GOOD_PATTERNS = """
+Reference patterns — copy this exact syntax when these resources appear:
+
+# EventBridge Connection (no InvocationType property exists)
+MyConnection:
+  Type: AWS::Events::Connection
+  Properties:
+    Name: my-connection
+    AuthorizationType: API_KEY
+    AuthParameters:
+      ApiKeyAuthParameters:
+        ApiKeyName: key1
+        ApiKeyValue: !Ref ApiKeyParam
+
+# EventBus with logging (property is LogConfig, not LoggingConfig; IncludeDetail is a STRING with allowed values FULL/NONE, never a boolean; no LogGroupArn property exists)
+MyEventBus:
+  Type: AWS::Events::EventBus
+  Properties:
+    Name: my-bus
+    KmsKeyIdentifier: alias/aws/events
+    LogConfig:
+      Level: ERROR
+      IncludeDetail: "FULL"
+
+# Pipe logging (property is LogConfiguration, NOT LogConfig — that's the EventBus property name, do not reuse it here. Nests under CloudwatchLogsLogDestination.LogGroupArn; IncludeExecutionData is a LIST of strings like ["ALL"], not a boolean; Level is a string. Like any other target writing to CloudWatch Logs, the log group needs a companion ResourcePolicy or logs silently never arrive.)
+MyPipeLogGroup:
+  Type: AWS::Logs::LogGroup
+  Properties:
+    LogGroupName: /aws/vendedlogs/pipes/my-pipe
+MyPipeLogGroupPolicy:
+  Type: AWS::Logs::ResourcePolicy
+  Properties:
+    PolicyName: !Sub "${AWS::StackName}-pipe-logs-policy"
+    PolicyDocument: !Sub |
+      {"Version":"2012-10-17","Statement":[{"Sid":"TrustPipesToStoreLogEvent","Effect":"Allow","Principal":{"Service":"pipes.amazonaws.com"},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/pipes/my-pipe:*"}]}
+MyPipeWithLogging:
+  Type: AWS::Pipes::Pipe
+  DependsOn: MyPipeLogGroupPolicy
+  Properties:
+    DesiredState: RUNNING
+    LogConfiguration:
+      Level: ERROR
+      IncludeExecutionData:
+        - "ALL"
+      CloudwatchLogsLogDestination:
+        LogGroupArn: !GetAtt MyPipeLogGroup.Arn
+
+# Any string containing ${AWS::...} pseudo parameters MUST be wrapped in !Sub, or CloudFormation leaves the literal text "${AWS::Region}" unresolved instead of substituting it
+CorrectPseudoParamUsage: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/example:*"
+
+# Rule targeting CloudWatch Logs — Target has no TargetType field, and needs a companion ResourcePolicy or logs silently never arrive
+MyLogGroup:
+  Type: AWS::Logs::LogGroup
+  Properties:
+    LogGroupName: /aws/events/my-rule
+MyLogGroupPolicy:
+  Type: AWS::Logs::ResourcePolicy
+  Properties:
+    PolicyName: !Sub "${AWS::StackName}-eventbridge-logs-policy"
+    PolicyDocument: !Sub |
+      {"Version":"2012-10-17","Statement":[{"Sid":"TrustEventsToStoreLogEvent","Effect":"Allow","Principal":{"Service":["events.amazonaws.com","delivery.logs.amazonaws.com"]},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/my-rule:*"}]}
+MyRule:
+  Type: AWS::Events::Rule
+  DependsOn: MyLogGroupPolicy
+  Properties:
+    Targets:
+      - Id: LogsTarget
+        Arn: !GetAtt MyLogGroup.Arn
+
+# Referencing a ManagedPolicy (Ref returns the ARN — GetAtt has no Arn attribute)
+ManagedPolicyArns:
+  - !Ref MyManagedPolicy
+  # Never invent an AWS-managed policy ARN name (e.g. AmazonEventBridgeApiDestinationsRolePolicy, AWSEventsPipesFullAccess) unless you are certain it exists in the real AWS provider. If uncertain, always create a new AWS::IAM::ManagedPolicy resource scoped to only the specific actions/resources needed, rather than guessing a managed policy name.
+
+# Pipe activation state (property is DesiredState, values RUNNING/STOPPED — not PipeState/ENABLED)
+MyPipe:
+  Type: AWS::Pipes::Pipe
+  Properties:
+    DesiredState: RUNNING
+# AWS::Pipes::Pipe has NO FlexibleTimeWindow property — that belongs only to AWS::Scheduler::Schedule. Never add FlexibleTimeWindow to a Pipe resource under any circumstances.
+
+# IAM action for invoking an API Destination (not events:PutEvents)
+MyApiDestinationPolicy:
+  Type: AWS::IAM::ManagedPolicy
+  Properties:
+    PolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Action:
+            - events:InvokeApiDestination
+          Resource: !GetAtt MyApiDestination.Arn
+
+# AWS::Pipes::Pipe HttpParameters — all three sub-fields are PascalCase.
+# QueryStringParameters is commonly miswritten as queryStringParameters
+# (lowercase q) — this fails cfn-lint (E3002) even though the other two
+# fields are usually cased correctly.
+TargetParameters:
+  HttpParameters:
+    PathParameterValues: []
+    HeaderParameters: {}
+    QueryStringParameters: {}
+  InputTemplate: "{\"body\": <$.body>}"
+
+# Rule target RoleArn vs Pipe RoleArn — DO NOT reuse. A role's trust policy
+# Principal must match the service that will assume it. A role trusted by
+# pipes.amazonaws.com cannot be used as a Rule target's RoleArn (which needs
+# events.amazonaws.com), and vice versa. Each needs its own role + policy.
+MyRuleRole:
+  Type: AWS::IAM::Role
+  Properties:
+    AssumeRolePolicyDocument:
+      Version: "2012-10-17"
+      Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sts:AssumeRole
+    ManagedPolicyArns:
+      - !Ref MyRulePolicy
+
+# Ref on AWS::Events::Connection returns the FULL CONNECTION ARN, never the
+# connection name. Never interpolate !Ref <Connection> into a secret ARN
+# string expecting a bare name — use the literal Name string instead, with
+# a wildcard for the auto-generated suffix (the suffix cannot be known at
+# template-authoring time):
+Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:events!connection/MyConnectionName/*"
+
+# Rule 32 — Ref vs GetAtt for ARNs on Rule/Pipe outputs. Ref on
+# AWS::Events::Rule and AWS::Pipes::Pipe returns the resource NAME, not
+# the ARN. This deploys fine and passes cfn-lint (it's not a schema
+# error), but silently exports the wrong value to anyone consuming it
+# via Fn::ImportValue expecting an ARN. Always use !GetAtt <LogicalId>.Arn
+# for these two resource types when an ARN is needed, e.g. in Outputs:
+Outputs:
+  RuleArn:
+    Value: !GetAtt MTMSCourseInstallationRule.Arn
+  PipeArn:
+    Value: !GetAtt MTMSCourseInstallationPipe.Arn
+"""
+
+
+CLOUDFORMATION_RULES_ONLY = """
+When generating any CloudFormation template always follow these rules without being told:
+
+1. IAM — always use AWS::IAM::ManagedPolicy resources, never inline policies. Attach via ManagedPolicyArns on the Role directly. Never use AWS::IAM::PolicyAttachment, it is not a valid resource type.
+2. Names — never hardcode resource names. Always use !Sub "${AWS::StackName}-..." for all resource names.
+3. Endpoints — any URL parameter must have AllowedPattern: "^https://.*" and ConstraintDescription.
+4. Parameters — every parameter must have a Description field.
+5. Secrets — always use NoEcho: true for API keys, passwords, tokens.
+6. SQS — AWS::SQS::Queue does not support Description property. Use Tags instead.
+7. Pipes — AWS::Pipes::Pipe Source and Target must be plain !GetAtt ARN strings, not nested objects.
+8. ApiDestination — use InvocationEndpoint property, not Endpoint or DestinationArn. Always include HttpMethod and InvocationRateLimitPerSecond.
+9. Connection — always use ApiKeyAuthParameters structure exactly:
+   AuthorizationType: API_KEY
+   AuthParameters:
+     ApiKeyAuthParameters:
+       ApiKeyName: <ref>
+       ApiKeyValue: <ref>
+10. Pipes IAM — scope permissions to specific resource ARNs, never use Resource: "*". Always include secretsmanager:GetSecretValue and secretsmanager:DescribeSecret on arn:aws:secretsmanager:*:*:secret:events!connection/*
+11. Scheduler — always include FlexibleTimeWindow with Mode as a quoted string "OFF":
+    FlexibleTimeWindow:
+      Mode: "OFF"
+    IMPORTANT: Never write Mode: OFF without quotes. YAML will parse OFF as boolean false and CloudFormation will reject it.
+12. Lambda — use python3.12 and boto3 by default. Read all config from os.environ.
+12b. Lambda Code — AWS::Lambda::Function always requires a Code property. If the user's request is infrastructure-only with no actual function logic provided, use a minimal inline placeholder:
+     Code:
+       ZipFile: |
+         def handler(event, context):
+             print(event)
+             return {"statusCode": 200}
+     Never omit Code entirely — cfn-lint rejects it as a required property (E3003).
+12c. IAM Role policies referencing their own resource's log group — when writing a Lambda execution role's CloudWatch Logs policy, never use !Sub with ${LogicalId} where LogicalId is the Lambda function that has Role: !GetAtt <ThisRole>.Arn — that creates a circular dependency (E3004). Instead, hardcode the log group path using the same !Sub "${AWS::StackName}-..." pattern already used for the function's FunctionName, e.g. arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-<function-name-suffix>:* — never interpolate the function's logical ID itself.
+13. Outputs — always export every output with Export: Name: !Sub "${AWS::StackName}-<name>". Include an output for every major resource created.
+14. DLQ — always add a Dead Letter Queue for SQS source queues with maxReceiveCount: 3
+15. Return only valid YAML — no explanations before or after the template. WRONG: "Here's the CloudFormation template you requested:\n\nAWSTemplateFormatVersion: ...". CORRECT: response starts directly with "AWSTemplateFormatVersion: '2010-09-09'".
+16. YAML boolean trap — always quote these values when used as strings: "OFF", "ON", "YES", "NO", "TRUE", "FALSE". Without quotes YAML parses them as booleans, causing CloudFormation validation errors.
+17. Required parameters — for any Parameter without a Default value, the Description must clearly state it is required and include an example. Example: Description: "Required. The endpoint URL for the Unit API. Example: https://api.example.com/notify"
+18. Conversation memory — if the user refers to "the template", "this template", "the one above", "it", or asks to "fix" or "update" something without repasting the full YAML, look at the most recent template in the conversation history and modify that one. Always return the FULL corrected template, not just the changed parts.
+19. EventBridge → CloudWatch Logs targets — a Rule or Pipe target pointing at a CloudWatch Logs log group requires a companion AWS::Logs::ResourcePolicy granting events.amazonaws.com and delivery.logs.amazonaws.com permission to CreateLogStream/PutLogEvents on that log group ARN. CloudFormation cannot create this automatically (only the console does it silently) — omitting it means the rule deploys successfully but silently never delivers any logs. Never put a TargetType field on a Target object; it does not exist in the schema — a CloudWatch Logs target is identified purely by its Arn.
+20. AWS::IAM::ManagedPolicy references — ManagedPolicy has no "Arn" attribute in Fn::GetAtt. Always reference it with !Ref <LogicalId> to get its ARN, never !GetAtt <LogicalId>.Arn.
+21. AWS::Events::Connection has no InvocationType property — never include it. AWS::Events::EventBus encryption/logging uses KmsKeyIdentifier directly (no EncryptionType wrapper) and LogConfig with fields Level (string: OFF/ERROR/INFO/TRACE) and IncludeDetail (string: FULL/NONE — never a boolean). There is no LogGroupArn property on EventBus — EventBridge manages the log destination itself via LogConfig.
+22. API Destination invocation permission — the IAM action required to invoke an API Destination is events:InvokeApiDestination. Never use events:PutEvents for this purpose.
+23. AWS::Pipes::Pipe logging — the property is LogConfiguration, never LogConfig (LogConfig is the EventBus property name, do not reuse it on a Pipe). It nests under CloudwatchLogsLogDestination.LogGroupArn, IncludeExecutionData (a LIST of strings, e.g. ["ALL"], not a boolean), and Level (string). Exactly like a Rule target writing to CloudWatch Logs, the pipe's log group needs a companion AWS::Logs::ResourcePolicy granting pipes.amazonaws.com permission to CreateLogStream/PutLogEvents on that log group's ARN — never emit a ResourcePolicy with an empty or incomplete PolicyDocument (missing Principal/Action/Resource); it must always contain the full, valid statement.
+24. Pseudo parameters inside string literals — any string containing ${AWS::Region}, ${AWS::AccountId}, ${AWS::StackName}, or similar must be wrapped in !Sub. A bare string like Resource: "arn:...:${AWS::Region}:..." without !Sub is invalid; CloudFormation will not substitute the variable and it will deploy with the literal, unresolved text.
+25. Logical IDs — every resource's logical ID (the YAML key naming the resource, e.g. MyBucket: under Resources:) must be alphanumeric only — no underscores, no hyphens. CloudFormation logical IDs must match ^[a-zA-Z0-9]+$. Use PascalCase instead of underscores: write MTMSCourseInstallationConnection, never MTMS_Course_Installation_Connection. This applies only to the logical ID itself — the Name: property inside Properties (e.g. Name: MTMS-Course-Installation) may still contain hyphens and is unaffected.
+26. Colons inside plain string values — any Description, ConstraintDescription, or other string value that contains a colon followed by a space (": "), such as "Example: https://..." or "Note: ...", must be wrapped in double quotes. YAML interprets an unquoted ": " as the start of a new mapping key even mid-sentence, which causes a template-wide parsing error.
+27. AWS::Pipes::Pipe SQS source — the property is SqsQueueParameters (lowercase "qs"), never SQSQueueParameters.
+28. AWS::Pipes::Pipe API Destination target — HttpParameters and InputTemplate go directly under TargetParameters with no wrapper property. There is no EventBridgeApiDestinationParameters property; it does not exist in the schema. If the user asks to pass "only the body" or similar, always include InputTemplate: "{\"body\": <$.body>}" under TargetParameters — omitting it forwards the entire event, not just the body.
+29. SQS queue type — never create a FIFO queue (no .fifo suffix, no FifoQueue: true, no ContentBasedDeduplication) unless the user explicitly says "FIFO". A request for a "Standard queue" or unspecified queue type must produce a plain AWS::SQS::Queue with no FIFO properties.
+30. AWS::Events::Connection Ref — Ref returns the FULL ARN, not the connection name. Never build a secret ARN string like "events!connection!${MyConnection}" expecting a name — that inserts an entire ARN into the string, producing an invalid path. Use the literal connection Name string plus a wildcard suffix instead.
+31. RoleArn/Principal matching — every IAM Role handed to a resource as a RoleArn (Rule target, Pipe RoleArn, Scheduler role, etc.) must have an AssumeRolePolicyDocument Principal matching the exact service that will assume it. Never reuse one role across two different target types (e.g. a role trusted by pipes.amazonaws.com must never be assigned as a Rule target's RoleArn, which requires events.amazonaws.com). Each distinct assuming service gets its own Role + ManagedPolicy pair.
+32. Ref return-value differences per resource type — ... Never assume Ref returns an ARN without checking this list first; when in doubt, use !GetAtt <LogicalId>.Arn.
+33. AWS::Pipes::Pipe HttpParameters casing — under TargetParameters.HttpParameters, all three sub-fields must be exact PascalCase: PathParameterValues, HeaderParameters, QueryStringParameters. The model has repeatedly emitted "queryStringParameters" with a lowercase q — this is invalid and fails cfn-lint (E3002). Always write QueryStringParameters with a capital Q, matching PathParameterValues and HeaderParameters exactly.
+34. Self-referential RedrivePolicy — a queue's RedrivePolicy.deadLetterTargetArn must never reference its own logical ID (e.g. MTMSCourseInstallationDLQ pointing RedrivePolicy at !GetAtt MTMSCourseInstallationDLQ.Arn). This creates an unresolvable circular dependency. A Dead Letter Queue itself does not need a RedrivePolicy unless the user explicitly requests a second-tier DLQ chain (DLQ -> DLQ2) — do not add one to a DLQ just because a source queue nearby has one.
+35. AWS::SQS::Queue message retention property name — the property is MessageRetentionPeriod, never RetentionPeriod. "RetentionPeriod" does not exist on this resource type and fails cfn-lint (E3002). This applies to both source queues and their Dead Letter Queues.
+36. Account-level SCP constraints — this account enforces two Service Control Policies that cfn-lint cannot see, so violating them produces a template that validates fine but is DENIED at deploy time:
+    a) Instance sizing ceiling — AWS::EC2::Instance/LaunchConfiguration/LaunchTemplate InstanceType must be one of t*.micro/t*.small/t*.medium/t*.large only (e.g. t3.micro, t3a.small — never m5.large, t3.xlarge, or anything outside micro/small/medium/large). AWS::RDS::DBInstance DBInstanceClass must be db.t*.micro/small/medium/large only. AWS::ElastiCache::CacheCluster/ReplicationGroup CacheNodeType must be cache.t*.micro only — no other cache size is permitted.
+    b) No root principal — never write a Principal that references the account root ARN (arn:aws:iam::*:root) in any trust policy, resource policy, or bucket/queue policy. This is denied unconditionally regardless of the intended permissions — always scope Principal to a specific service (e.g. events.amazonaws.com) or a specific IAM role/user ARN instead.
+"""
+
+
+CLOUDFORMATION_RULES = KNOWN_GOOD_PATTERNS + """
+You are a CloudFormation expert assistant.
+
+OUTPUT FORMAT — READ THIS FIRST: Your entire response must be the raw YAML template and nothing else. Do not include any preamble, explanation, summary, or closing remarks — not even a single line like "Here is the template:" or "Let me know if you need changes." The first character of your response must be the YAML content itself (e.g. "AWSTemplateFormatVersion:"), and the last character must be the final line of the template.
+""" + CLOUDFORMATION_RULES_ONLY
+
+
+TERRAFORM_RULES_ONLY = """
+When generating Terraform configuration in JSON syntax (.tf.json), always follow these rules without being told:
+
+1. Structure — top-level keys are "terraform", "provider", "resource", "variable", "output" as needed. Output must be a single valid JSON object.
+2. Provider block — always include:
+   "terraform": {"required_providers": {"aws": {"source": "hashicorp/aws", "version": "~> 5.0"}}},
+   "provider": {"aws": {"region": "eu-north-1"}}
+3. Resource types — use correct AWS provider naming, e.g. aws_sqs_queue, aws_lambda_function, aws_iam_role, aws_iam_policy, aws_iam_role_policy_attachment, aws_scheduler_schedule, aws_pipes_pipe, aws_cloudwatch_event_api_destination, aws_cloudwatch_event_connection.
+4. Naming — do not hardcode resource names; use variables where CloudFormation would use !Sub "${AWS::StackName}-...". Define a "stack_name" variable and reference it as "${var.stack_name}-..." inside "name" fields.
+5. References — reference other resources using Terraform interpolation syntax as JSON strings, e.g. "${aws_sqs_queue.my_queue.arn}", never bare ARNs.
+6. IAM — use aws_iam_role with a JSON-encoded assume role policy, plus separate aws_iam_policy and aws_iam_role_policy_attachment resources. Never inline broad "*" permissions; scope to specific resource ARNs.
+7. Secrets/API keys — mark sensitive variables with "sensitive": true in the variable block.
+8. Scheduler — aws_scheduler_schedule requires a "flexible_time_window" block with "mode": "OFF" (as a plain JSON string, not boolean).
+9. Outputs — define an "output" block for every major resource created (ARNs, URLs, names).
+10. DLQ — always add a dead-letter aws_sqs_queue for source queues, and configure "redrive_policy" with maxReceiveCount: 3 on the source queue.
+11. Connection auth — aws_cloudwatch_event_connection auth_parameters must nest api key fields one level deeper under an "api_key" block: "auth_parameters": {"api_key": {"key": "...", "value": "..."}}. Never put "api_key_name"/"api_key_value" directly under auth_parameters.
+12. API Destination — aws_cloudwatch_event_api_destination uses flat top-level attributes: "invocation_endpoint", "http_method", "invocation_rate_limit_per_second", "connection_arn". Never nest these inside a "destination_config" block; that block does not exist in this resource's schema.
+13. Return only valid JSON — no explanations, no markdown fences, no comments. WRONG: "Here's the Terraform config:\n\n```json\n{...}\n```". CORRECT: response starts directly with "{" and ends with "}".
+14. Conversation memory — if the user refers to "the template", "this template", "the one above", "it", or asks to "fix"/"update" without repasting it, modify the most recent Terraform JSON template in conversation history and return the FULL corrected JSON, not a partial diff.
+15. EventBridge resource types — the correct resource types are aws_cloudwatch_event_bus and aws_cloudwatch_event_rule. There is no aws_eventbridge_bus or aws_eventbridge_rule resource type in the AWS provider; using either will fail terraform validate entirely. aws_cloudwatch_event_bus does not have a "logging_config" or "cloudwatch_logs_group_arn" attribute — event bus logging in Terraform is configured via a separate aws_cloudwatch_event_bus resource with no built-in logging block; to deliver bus logs to CloudWatch, create the log group and a companion resource policy exactly as in rule 19 below.
+16. jsonencode() closing syntax — every ${jsonencode({...})} interpolation must close with three characters in this exact order: the closing brace of the JSON object }, then the closing paren of jsonencode ), then the closing brace of the interpolation }. The full closing sequence is "})}" immediately before the final closing quote. A string ending in ")\"" instead of "})}\"" is missing the interpolation's closing brace and is invalid HCL/JSON — this is a common and easy mistake, so double-check every jsonencode() call in the file before returning it, not just the first one.
+17. SQS queue type — Standard queues by default, ALWAYS, for BOTH the source queue AND its DLQ — a redrive relationship requires matching queue types, so if one is Standard the other must be too. Only use "fifo_queue": true and a ".fifo" name suffix on either queue if the user's request contains the literal word "FIFO" or "fifo". Before finalizing output, check every aws_sqs_queue block in the file, including DLQs: if "fifo_queue" appears anywhere and the user's original request did not contain the word "FIFO", remove it and the ".fifo" suffix from that resource.
+18. API Destination invocation permission — the IAM action required to invoke an API Destination is events:InvokeApiDestination, scoped to that specific API Destination's ARN. Never use events:PutEvents for this purpose, and never use "Resource": ["*"] on any IAM policy statement in this file — every action must be scoped to the specific ARN of the resource it applies to, matching the "least-privilege" requirement whenever the user requests minimum permissions.
+19. CloudWatch Logs resource policy — whenever a Rule or Pipe target writes to a CloudWatch Logs log group, or an Event Bus is configured with logging, include a companion aws_cloudwatch_log_resource_policy resource granting the correct service principal (events.amazonaws.com AND delivery.logs.amazonaws.com, as a list, for Rules/Event Buses; pipes.amazonaws.com for Pipes) permission for logs:CreateLogStream and logs:PutLogEvents on that specific log group's ARN. Follow this exact pattern, copying the bracket structure precisely:
+"policy_document": "${jsonencode({Version=\"2012-10-17\",Statement=[{Effect=\"Allow\",Principal={Service=[\"events.amazonaws.com\",\"delivery.logs.amazonaws.com\"]},Action=[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],Resource=[\"${aws_cloudwatch_log_group.EXAMPLE.arn}\"]}]})}"
+Count the closing characters from right to left before returning: the string must end in exactly `]})}"` — one closing bracket for Resource's list, one closing brace for the Statement object, one closing bracket for the Statement list, one closing brace for the jsonencode() object, one closing paren for jsonencode(), one closing brace for the interpolation, then the quote. Omitting this resource policy means logs are silently never delivered even though the resource deploys successfully.
+20. aws_cloudwatch_event_bus attributes — the KMS attribute is kms_key_identifier (not kms_key_id — that name belongs to aws_cloudwatch_log_group, a different resource). The logging block is named log_config (not logging_config), containing level and include_execution_data as direct children.
+21. aws_pipes_pipe logging — the top-level attribute is log_configuration (not logging_config), containing level and include_execution_data as direct children, PLUS a nested cloudwatch_logs_log_destination block containing log_group_arn. Never place log_group_arn as a flat sibling of level/include_execution_data — it must be nested one level deeper inside cloudwatch_logs_log_destination. Follow this exact shape: "log_configuration": {"level": "ERROR", "include_execution_data": true, "cloudwatch_logs_log_destination": {"log_group_arn": "${aws_cloudwatch_log_group.EXAMPLE.arn}"}}
+22. Interpolation syntax — ALWAYS use ${...} (dollar sign + curly braces). NEVER use $(...) (dollar sign + parentheses) anywhere — that is shell syntax, not Terraform, and produces a broken literal string instead of a reference. Scan every string for the exact sequence "$(" and correct it to "${" before returning, especially inside jsonencode() Resource/ARN lists.
+23. aws_cloudwatch_event_api_destination — connection_arn is a REQUIRED argument. Every api_destination resource must include "connection_arn": "${aws_cloudwatch_event_connection.<name>.arn}" pointing at a connection defined in the same file. Never create an aws_cloudwatch_event_connection that nothing references.
+24. EventBridge Rule with an SQS queue target — the target queue must have a companion aws_sqs_queue_policy resource granting events.amazonaws.com sqs:SendMessage permission, scoped to that queue's ARN — parallel to the CloudWatch Logs resource-policy pattern in rule 19. Omitting it means the rule fires but delivery is silently denied at runtime.
+"""
+
+
+TERRAFORM_RULES = """
+You are a Terraform expert assistant.
+
+OUTPUT FORMAT — READ THIS FIRST: Your entire response must be a single raw JSON object and nothing else. No preamble, no explanation, no markdown fences, no trailing commentary. The first character of your response must be "{" and the last character must be "}".
+""" + TERRAFORM_RULES_ONLY
+
+
+def detect_format(query, chat_history=None):
+    """Detect whether the user wants Terraform JSON or CloudFormation YAML.
+    Falls back to the format of the last generated template if the request
+    doesn't mention a format explicitly (e.g. 'fix this')."""
+    q = query.lower()
+    if "terraform" in q or "tf.json" in q:
+        return "terraform_json"
+    if "cloudformation" in q or "cfn" in q or "yaml" in q or "yml" in q:
+        return "cloudformation_yaml"
+
+    if chat_history:
+        for msg in reversed(chat_history):
+            if msg.get("role") == "assistant" and msg.get("type") == "template":
+                return msg.get("format", "cloudformation_yaml")
+
+    return "cloudformation_yaml"
+
+
+from langchain_aws import ChatBedrock
+
+def get_llm():
+    session = boto3.Session(profile_name=BEDROCK_PROFILE)
+    llm = ChatBedrock(
+        model_id=BEDROCK_MODEL_ID,
+        region_name=AWS_REGION,
+        client=session.client("bedrock-runtime", region_name=AWS_REGION),
+        model_kwargs={"temperature": 0.4, "max_tokens": 4096},
+    )
+    print(f"LLM initialized: Bedrock {BEDROCK_MODEL_ID}")
+    return llm
+
+def is_template_request(query):
+    """Detect if the user is asking for a template"""
+    keywords = [
+        "generate", "create", "template", "cloudformation",
+        "yaml", "json", "infrastructure", "iac", "stack",
+        "write a", "give me a", "make a", "build a",
+        "fix", "update", "modify", "change", "correct", "edit",
+        "terraform"
+    ]
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in keywords)
+
+
+def get_last_template(chat_history, fmt=None):
+    """Find the most recently generated template in chat history.
+    If fmt is given, only return a template that matches that format,
+    so a 'fix this' request doesn't inject the wrong format's template."""
+    for msg in reversed(chat_history):
+        if msg.get("role") == "assistant" and msg.get("type") == "template" and "template" in msg:
+            msg_fmt = msg.get("format", "cloudformation_yaml")
+            if fmt is None or msg_fmt == fmt:
+                return msg["template"]
+    return None
+
+def _is_short_confirmation(request):
+    """True if the request is just a bare yes/no reply to the improvement
+    suggestions prompt, so generate_template can short-circuit it before
+    retrieval or any LLM call — instead of treating it as a new template
+    request or a 'fix this' instruction."""
+    normalized = request.strip().lower().rstrip(".!")
+    return normalized in {"yes", "no", "y", "n"}
+
+def _looks_degenerate(text):
+    """Detect common free-model failure signatures: literal pad tokens,
+    or the same word repeated many times in a row (a repetition loop)."""
+    if not text:
+        return True
+    if "<pad>" in text:
+        return True
+    words = text.split()
+    if len(words) > 20:
+        run = 1
+        for i in range(1, len(words)):
+            if words[i] == words[i - 1]:
+                run += 1
+                if run >= 5:
+                    return True
+            else:
+                run = 1
+    return False
+
+
+def _extract_text(content):
+    """response.content is usually a str, but some providers/LangChain
+    versions return a list of content blocks instead, e.g.
+    [{"type": "text", "text": "..."}], sometimes with a separate
+    reasoning block. Normalize to plain string before any string
+    method touches it."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if block.get("type") in ("reasoning", "thinking"):
+                    continue
+                if "text" in block:
+                    parts.append(block["text"])
+        return "".join(parts)
+    return str(content) if content is not None else ""
+
+
+def _strip_think_block(content):
+    content = _extract_text(content)
+    if not content:
+        return content
+    if "<think>" in content:
+        if "</think>" in content:
+            content = content.split("</think>", 1)[1]
+        else:
+            print("WARNING: <think> block never closed — model likely hit max_tokens while reasoning")
+            content = content.split("<think>", 1)[0]
+    return content.strip()
+
+
+def _strip_fences(content):
+    """Strip a leading Qwen <think> block, then markdown code fences
+    regardless of language tag, then fall back to trimming any stray
+    preamble sentence Qwen adds despite instructions not to."""
+    cleaned = _strip_think_block(content)
+
+    for fence in ("```yaml", "```json", "```"):
+        if cleaned.startswith(fence):
+            cleaned = cleaned[len(fence):]
+            break
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    # Fallback: if there's still a stray preamble line before the real
+    # content (Qwen occasionally adds one despite instructions), drop
+    # everything before the first line that looks like real YAML/JSON.
+    lines = cleaned.split("\n")
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("{") or re.match(r"^[A-Za-z][\w:.\-]*:", stripped):
+            if i > 0:
+                print(f"WARNING: stripped {i} preamble line(s) before real content")
+            cleaned = "\n".join(lines[i:])
+            break
+
+    return cleaned.strip()
+
+
+def _quote_colon_in_descriptions(template):
+    """Nova Lite frequently emits unquoted Description/ConstraintDescription
+    values containing 'Example: ...' or 'Note: ...' (rule 26), which breaks
+    YAML parsing entirely ('mapping values are not allowed here') before
+    cfn-lint or any static check ever runs. Auto-quote any such line that
+    isn't already quoted, mirroring the other auto-correction regexes below
+    rather than relying solely on the model to follow rule 26."""
+    def fix_line(m):
+        indent, key, value = m.group(1), m.group(2), m.group(3)
+        value = value.rstrip()
+        if not value:
+            return m.group(0)
+        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+            return m.group(0)
+        if ": " not in value:
+            return m.group(0)
+        escaped = value.replace('"', '\\"')
+        return f'{indent}{key}: "{escaped}"'
+
+    return re.sub(r'^(\s*)(Description|ConstraintDescription):[ \t]+(.+)$', fix_line, template, flags=re.MULTILINE)
+
+
+def _fix_redrive_policy_casing(template):
+    """RedrivePolicy is one of the few CloudFormation properties that's a raw
+    JSON blob mirroring the underlying SQS API directly, rather than a
+    normal PascalCase-modeled property. Nova Lite consistently emits
+    PascalCase keys (DeadLetterTargetArn, MaxReceiveCount) here, which
+    cfn-lint rejects (E3002) even though PascalCase is the norm everywhere
+    else in the template. Deterministically lowercase these two specific
+    keys rather than relying on the model to get this inconsistency right."""
+    template = re.sub(r'\bDeadLetterTargetArn\b', 'deadLetterTargetArn', template)
+    template = re.sub(r'\bMaxReceiveCount\b', 'maxReceiveCount', template)
+    return template
+
+
+def _fix_pipe_sqs_source_parameters(template):
+    """AWS::Pipes::Pipe SourceParameters for an SQS source must use the key
+    SqsQueueParameters, never SqsQueue (rule 27's cousin bug — the model
+    reliably gets the property name wrong here). The batching-window field
+    inside it is MaximumBatchingWindowInSeconds, never BatchingWindow.
+    Fix both deterministically rather than depending on repair rounds,
+    which have proven unreliable for this exact pair of errors."""
+    template = re.sub(r'^(\s*)SqsQueue:\s*$', r'\1SqsQueueParameters:', template, flags=re.MULTILINE)
+    template = re.sub(r'^(\s*)BatchingWindow(\s*:)', r'\1MaximumBatchingWindowInSeconds\2', template, flags=re.MULTILINE)
+    return template
+
+
+def _strip_unneeded_sub(template):
+    """Fn::Sub with no ${...} inside is valid CloudFormation but triggers
+    cfn-lint W1020. Deterministically strip it instead of burning an LLM
+    repair round on it — this is exactly the harmless case seen when a
+    static JSON payload (e.g. a Scheduler Target's Input) got wrapped in
+    !Sub unnecessarily. Only touches multi-line block scalars (!Sub |),
+    since that's the pattern this has actually occurred in."""
+    def fix_block(m):
+        indent, content = m.group(1), m.group(2)
+        if "${" in content:
+            return m.group(0)
+        return f"{indent}|\n{content}"
+    return re.sub(r'(\s*)!Sub \|\n((?:\1  .*\n?)+)', fix_block, template)
+
+
+def _validate_cloudformation(template):
+    """Run cfn-lint against generated YAML. Returns (is_valid, error_text, lint_ran).
+
+    Uses cfnlint's Python API (cfnlint.api.lint) directly in-process rather than
+    shelling out via subprocess. This guarantees it runs against the exact same
+    interpreter/venv that's running Streamlit, with no dependence on PATH or on
+    which venv happens to be "active" in the shell that launched the app — that
+    mismatch (two different venv311 folders resolving inconsistently) was the
+    root cause of validation being silently skipped before.
+    """
+    try:
+        import cfnlint.api as cfnlint_api
+    except ImportError:
+        print("WARNING: cfnlint not installed in this interpreter — skipping validation. Run: pip install cfn-lint")
+        return True, "", False
+
+    try:
+        matches = cfnlint_api.lint(template)
+    except Exception as e:
+        print(f"WARNING: cfn-lint raised an unexpected error — skipping validation: {e}")
+        return True, "", False
+
+    if not matches:
+        return True, "", True
+
+    error_text = "\n".join(str(m) for m in matches)
+    return False, error_text, True
+
+def _strip_cfn_intrinsic_tags(template):
+    """yaml.safe_load can't parse short-form CloudFormation intrinsic tags
+    (!Ref, !GetAtt, !Sub, !Join, !If, !Select, !Split, etc.) without a custom
+    constructor. Rather than hardcoding an incomplete list — which silently
+    breaks parsing (and therefore skips ALL downstream static checks: role
+    mismatch, SCP compliance) whenever Nova Lite uses a tag not in that list —
+    strip any bare '!Word' tag generically with a regex."""
+    return re.sub(r'!\w+\b', '', template)
+
+
+def _extract_logical_id(ref_str):
+    """Pull the logical ID out of a stripped '!GetAtt Foo.Arn' -> 'Foo.Arn' string
+    after the yaml.safe_load strip in _check_role_principal_mismatch turned it
+    into a plain string."""
+    if isinstance(ref_str, str):
+        return ref_str.split(".")[0].strip()
+    return None
+
+
+def _check_role_principal_mismatch(template):
+    """Static check: for every 'RoleArn: !GetAtt X.Arn' assignment, find the
+    role X's AssumeRolePolicyDocument Principal.Service and flag if the
+    role is reused across resources that imply different assuming services
+    (Rule targets need events.amazonaws.com; Pipes need pipes.amazonaws.com;
+    Scheduler needs scheduler.amazonaws.com). Returns a list of warning
+    strings (empty if none found) to feed into the repair prompt alongside
+    cfn-lint errors — this catches cross-service role reuse that cfn-lint's
+    schema validation can't see because it's a semantic/deployment-time
+    error, not a schema violation."""
+    import yaml as pyyaml
+    try:
+        doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+    except Exception as e:
+        print(f"WARNING: role-principal check skipped, template did not parse after tag-stripping: {e}")
+        return []  # don't block on parse issues; cfn-lint already covers syntax
+
+    if not isinstance(doc, dict):
+        return []
+
+    resources = doc.get("Resources", {}) or {}
+    role_services = {}
+    for name, res in resources.items():
+        if not isinstance(res, dict):
+            continue
+        if res.get("Type") == "AWS::IAM::Role":
+            stmts = res.get("Properties", {}).get("AssumeRolePolicyDocument", {}).get("Statement", [])
+            if isinstance(stmts, dict):
+                stmts = [stmts]
+            for s in stmts:
+                if not isinstance(s, dict):
+                    continue
+                svc = s.get("Principal", {}).get("Service") if isinstance(s.get("Principal"), dict) else None
+                if svc:
+                    role_services[name] = svc if isinstance(svc, list) else [svc]
+
+    expected_service = {
+        "AWS::Pipes::Pipe": "pipes.amazonaws.com",
+        "AWS::Scheduler::Schedule": "scheduler.amazonaws.com",
+    }
+    warnings = []
+    for name, res in resources.items():
+        if not isinstance(res, dict):
+            continue
+        rtype = res.get("Type")
+        props = res.get("Properties", {}) or {}
+
+        # Direct RoleArn on Pipe/Scheduler
+        if rtype in expected_service and "RoleArn" in props:
+            role_name = _extract_logical_id(props["RoleArn"])
+            if role_name in role_services and expected_service[rtype] not in role_services[role_name]:
+                warnings.append(
+                    f"{name} ({rtype}) uses RoleArn pointing to {role_name}, whose trust policy allows "
+                    f"{role_services[role_name]}, not {expected_service[rtype]}. Create a separate Role "
+                    f"trusted by {expected_service[rtype]} instead of reusing {role_name}."
+                )
+
+        # Rule targets
+        if rtype == "AWS::Events::Rule":
+            targets = props.get("Targets", [])
+            if isinstance(targets, list):
+                for t in targets:
+                    if not isinstance(t, dict):
+                        continue
+                    if "RoleArn" in t:
+                        role_name = _extract_logical_id(t["RoleArn"])
+                        if role_name in role_services and "events.amazonaws.com" not in role_services[role_name]:
+                            warnings.append(
+                                f"{name} target {t.get('Id')} uses RoleArn pointing to {role_name}, whose trust "
+                                f"policy allows {role_services[role_name]}, not events.amazonaws.com. Create a "
+                                f"separate Role trusted by events.amazonaws.com instead of reusing {role_name}."
+                            )
+    return warnings
+
+
+def _check_scp_compliance(template):
+    """Static check mirroring the two account-level SCPs enforced on this
+    account: (1) an EC2/RDS/ElastiCache instance-size ceiling — only
+    t*.micro/small/medium/large (db.t*... for RDS, cache.t*.micro for
+    ElastiCache) are allowed; anything else passes cfn-lint but is denied
+    at the account level. (2) no Principal may ever be an account root ARN
+    (arn:aws:iam::*:root) — also denied account-wide regardless of what the
+    template's own IAM logic intends. Returns a list of warning strings
+    (empty if none found), fed into the same repair loop as
+    _check_role_principal_mismatch."""
+    import yaml as pyyaml
+    try:
+        doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+    except Exception as e:
+        print(f"WARNING: SCP compliance check skipped, template did not parse after tag-stripping: {e}")
+        return []
+
+    if not isinstance(doc, dict):
+        return []
+
+    resources = doc.get("Resources", {}) or {}
+    warnings = []
+
+    EC2_ALLOWED = ["t*.micro", "t*.small", "t*.medium", "t*.large"]
+    RDS_ALLOWED = ["db.t*.micro", "db.t*.small", "db.t*.medium", "db.t*.large"]
+    CACHE_ALLOWED = ["cache.t*.micro"]
+
+    def wildcard_match(pattern, value):
+        if not isinstance(value, str):
+            return False
+        regex = "^" + re.escape(pattern).replace(r'\*', '.*') + "$"
+        return bool(re.match(regex, value, re.IGNORECASE))
+
+    def any_match(patterns, value):
+        return any(wildcard_match(p, value) for p in patterns)
+
+    def _principal_is_unsafe(principal_val):
+        """A Principal is unsafe if it's an account root ARN, or a bare
+        wildcard ('*' or ['*']) granting public access. Handles the
+        'AWS' sub-key format (Principal: {AWS: ...}) as well as a bare
+        Principal: '*' string."""
+        if isinstance(principal_val, dict):
+            aws_val = principal_val.get("AWS")
+            values = aws_val if isinstance(aws_val, list) else [aws_val]
+        else:
+            values = [principal_val]
+
+        for v in values:
+            if not isinstance(v, str):
+                continue
+            if v.strip() == "*":
+                return True
+            if "root" in v.lower() and "arn:aws:iam" in v.lower():
+                return True
+        return False
+
+    def _principal_ref_looks_unsafe(ref_name):
+        """A Principal: {AWS: !Ref X} where X wasn't caught by the direct
+        ARN/wildcard check might still be a parameterized root-grant bypass —
+        X's own name or Description strongly implying it's meant to hold a
+        root ARN at deploy time. Check the Parameter's metadata, not just its
+        Default (a required parameter has no Default to inspect)."""
+        if not isinstance(ref_name, str):
+            return False
+        param = (doc.get("Parameters", {}) or {}).get(ref_name)
+        if not isinstance(param, dict):
+            return False
+        haystack = (ref_name + " " + str(param.get("Description", ""))).lower()
+        return "root" in haystack and ("arn:aws:iam" in haystack or "account root" in haystack)
+
+    def find_root_principal(obj):
+        found = False
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == "Principal":
+                    if _principal_is_unsafe(v):
+                        found = True
+                    aws_val = v.get("AWS") if isinstance(v, dict) else v
+                    ref_candidates = aws_val if isinstance(aws_val, list) else [aws_val]
+                    for rc in ref_candidates:
+                        if _principal_ref_looks_unsafe(rc):
+                            found = True
+                if find_root_principal(v):
+                    found = True
+        elif isinstance(obj, list):
+            for item in obj:
+                if find_root_principal(item):
+                    found = True
+        return found
+
+    def find_root_principal_in_parameter_defaults(res_name, res):
+        """Catches the parameter-indirection bypass: a PolicyDocument
+        that isn't inline but is instead '!Ref SomeParameter', where
+        that parameter's Default value is a JSON string containing an
+        unsafe Principal. After tag-stripping, '!Ref SomeParameter'
+        becomes the bare string 'SomeParameter' in the parsed doc."""
+        props = res.get("Properties", {}) or {}
+        policy_doc = props.get("PolicyDocument")
+        if not isinstance(policy_doc, str):
+            return None
+
+        param = (doc.get("Parameters", {}) or {}).get(policy_doc)
+        if not isinstance(param, dict):
+            return None
+
+        default_val = param.get("Default")
+        if not isinstance(default_val, str):
+            return None
+
+        try:
+            parsed = json.loads(default_val)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        if find_root_principal(parsed):
+            return (
+                f"{res_name} references PolicyDocument: !Ref {policy_doc}, and that parameter's "
+                f"Default value contains a policy with an unsafe Principal (root ARN or wildcard '*'). "
+                f"Moving the policy into a parameter does not exempt it from the account SCP — inline "
+                f"the PolicyDocument directly on the resource with a scoped, non-wildcard Principal instead."
+            )
+        return None
+
+    def _resolve_param_values(value):
+        """After tag-stripping, '!Ref X' becomes the bare string 'X'. If X is
+        actually a Parameter's logical ID, resolve to what that parameter can
+        really be (its AllowedValues, or its Default) instead of treating the
+        parameter's own name as the value — otherwise every !Ref'd
+        InstanceType/DBInstanceClass/CacheNodeType false-positives here.
+        Returns None if the parameter is required with no Default/AllowedValues
+        (can't be verified statically — better to skip than false-positive)."""
+        if not isinstance(value, str):
+            return [value]
+        params = doc.get("Parameters", {}) or {}
+        param = params.get(value)
+        if not isinstance(param, dict):
+            return [value]
+        allowed = param.get("AllowedValues")
+        if isinstance(allowed, list) and allowed:
+            return allowed
+        default = param.get("Default")
+        if default is not None:
+            return [default]
+        return None
+
+    for name, res in resources.items():
+        if not isinstance(res, dict):
+            continue
+        rtype = res.get("Type")
+        props = res.get("Properties", {}) or {}
+
+        if rtype in ("AWS::EC2::Instance", "AWS::AutoScaling::LaunchConfiguration", "AWS::EC2::LaunchTemplate"):
+            itype = props.get("InstanceType")
+            if itype is None and rtype == "AWS::EC2::LaunchTemplate":
+                itype = props.get("LaunchTemplateData", {}).get("InstanceType")
+            if itype:
+                candidates = _resolve_param_values(itype)
+                if candidates is not None:
+                    bad = [v for v in candidates if not any_match(EC2_ALLOWED, v)]
+                    if bad:
+                        warnings.append(
+                            f"{name} ({rtype}) InstanceType resolves to {bad}, which violates the account SCP "
+                            f"restricting EC2 instances to t*.micro/small/medium/large only. This passes cfn-lint "
+                            f"but is DENIED at deploy time — use one of the allowed sizes instead."
+                        )
+
+        if rtype == "AWS::RDS::DBInstance":
+            dclass = props.get("DBInstanceClass")
+            if dclass:
+                candidates = _resolve_param_values(dclass)
+                if candidates is not None:
+                    bad = [v for v in candidates if not any_match(RDS_ALLOWED, v)]
+                    if bad:
+                        warnings.append(
+                            f"{name} (AWS::RDS::DBInstance) DBInstanceClass resolves to {bad}, which violates the "
+                            f"account SCP restricting RDS instances to db.t*.micro/small/medium/large only. This "
+                            f"passes cfn-lint but is DENIED at deploy time — use one of the allowed sizes instead."
+                        )
+
+        if rtype in ("AWS::ElastiCache::CacheCluster", "AWS::ElastiCache::ReplicationGroup"):
+            ntype = props.get("CacheNodeType")
+            if ntype:
+                candidates = _resolve_param_values(ntype)
+                if candidates is not None:
+                    bad = [v for v in candidates if not any_match(CACHE_ALLOWED, v)]
+                    if bad:
+                        warnings.append(
+                            f"{name} ({rtype}) CacheNodeType resolves to {bad}, which violates the account SCP "
+                            f"restricting ElastiCache nodes to cache.t*.micro only. This passes cfn-lint but is "
+                            f"DENIED at deploy time — use cache.t*.micro instead."
+                        )
+
+        if find_root_principal(res):
+            warnings.append(
+                f"{name} ({rtype}) has a Principal referencing the account root ARN (arn:aws:iam::*:root) "
+                f"or a public wildcard ('*'). The account SCP denies unrestricted root/public access "
+                f"unconditionally — remove this and use a specific service or IAM role/user principal instead."
+            )
+
+        param_warning = find_root_principal_in_parameter_defaults(name, res)
+        if param_warning:
+            warnings.append(param_warning)
+
+    return warnings
+
+
+def _check_dlq_redrive_direction(template):
+    """Static check for a recurring, confirmed-twice bug: Nova Lite puts
+    RedrivePolicy on the DLQ itself (pointing back at the main queue) instead
+    of on the main/source queue (pointing at the DLQ) — backwards. Also
+    catches the companion bug: deadLetterTargetArn using !Ref (returns the
+    queue URL) instead of !GetAtt <Id>.Arn (returns the ARN) — schema-valid,
+    so cfn-lint never flags it, but semantically wrong at deploy time.
+    A queue is inferred to be a DLQ if its logical ID or QueueName contains
+    'DLQ' or 'DeadLetter' (case-insensitive) — same heuristic a human reader
+    would use, since CloudFormation has no formal DLQ resource type."""
+    import yaml as pyyaml
+    try:
+        doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+    except Exception as e:
+        print(f"WARNING: DLQ redrive-direction check skipped, template did not parse: {e}")
+        return []
+
+    if not isinstance(doc, dict):
+        return []
+
+    resources = doc.get("Resources", {}) or {}
+    warnings = []
+
+    def looks_like_dlq(logical_id, res):
+        name_field = str((res.get("Properties", {}) or {}).get("QueueName", ""))
+        haystack = (logical_id + " " + name_field).lower()
+        return "dlq" in haystack or "deadletter" in haystack or "dead-letter" in haystack
+
+    def extract_target_id(deadletter_val, raw_template):
+        """After tag-stripping, both !Ref X and !GetAtt X.Arn collapse to
+        bare strings — 'X' and 'X.Arn' respectively. Re-check the RAW
+        (untouched) template text to tell which tag was actually used,
+        since that distinction is exactly what we need to flag."""
+        if not isinstance(deadletter_val, str):
+            return None, None
+        target_id = deadletter_val.split(".")[0].strip()
+        ref_pattern = re.search(rf'!Ref\s+{re.escape(target_id)}\b', raw_template)
+        getatt_arn_pattern = re.search(rf'!GetAtt\s+{re.escape(target_id)}\.Arn\b', raw_template)
+        if getatt_arn_pattern:
+            return target_id, "GetAtt.Arn"
+        if ref_pattern:
+            return target_id, "Ref"
+        return target_id, "unknown"
+
+    for name, res in resources.items():
+        if not isinstance(res, dict) or res.get("Type") != "AWS::SQS::Queue":
+            continue
+        props = res.get("Properties", {}) or {}
+        redrive = props.get("RedrivePolicy")
+        if not isinstance(redrive, dict):
+            continue
+
+        target_id, ref_style = extract_target_id(redrive.get("deadLetterTargetArn"), template)
+
+        if looks_like_dlq(name, res):
+            warnings.append(
+                f"{name} appears to be a Dead Letter Queue (based on its name), but it has its own "
+                f"RedrivePolicy pointing at {target_id or 'another queue'}. RedrivePolicy belongs on the "
+                f"SOURCE/main queue (pointing at the DLQ), not on the DLQ itself. Remove RedrivePolicy from "
+                f"{name} entirely, and instead add it to the main queue that should redrive INTO {name}."
+            )
+        elif ref_style == "Ref":
+            warnings.append(
+                f"{name}'s RedrivePolicy.deadLetterTargetArn uses !Ref {target_id}, which returns the queue "
+                f"URL, not its ARN. deadLetterTargetArn requires an ARN — change this to "
+                f"!GetAtt {target_id}.Arn instead. This is schema-valid so cfn-lint will not catch it, but it "
+                f"silently misconfigures the redrive at deploy time."
+            )
+
+    return warnings
+
+
+def _check_invalid_parameter_defaults(template):
+    """CloudFormation Parameters.*.Default must be a literal scalar — no
+    intrinsic functions (!Sub, !Ref, !GetAtt, etc.) allowed. Nova Lite has
+    emitted Default: !Sub "${AWS::StackName}-bucket" (fails cfn-lint E2001
+    + two W1030s) — catch it on raw template text before tag-stripping so
+    it feeds into the same repair loop as SCP/role checks."""
+    warnings = []
+    in_parameters = False
+    current_param = None
+    for line in template.split("\n"):
+        if re.match(r'^Parameters:\s*$', line):
+            in_parameters = True
+            continue
+        if in_parameters and re.match(r'^[A-Za-z]', line):
+            in_parameters = False
+        if not in_parameters:
+            continue
+        m_param = re.match(r'^  ([A-Za-z0-9]+):\s*$', line)
+        if m_param:
+            current_param = m_param.group(1)
+            continue
+        m_default = re.match(r'^\s*Default:\s*(!\w+\b.*)$', line)
+        if m_default and current_param:
+            warnings.append(
+                f"Parameter {current_param} has Default: {m_default.group(1).strip()}, which uses an "
+                f"intrinsic function. Parameters.Default only accepts a literal string/number — never "
+                f"!Sub, !Ref, !GetAtt, or any other tag. Remove the Default line (or use a literal value) "
+                f"and apply the intrinsic function directly on the resource property that needs it instead."
+            )
+    return warnings
+
+def _review_template_for_improvements(llm, template, request, fmt, rules_only, prior_suggestions=None, current_scp_warnings=None):
+    """..."""
+    fence_lang = "json" if fmt == "terraform_json" else "yaml"
+    prior_suggestions = prior_suggestions or []
+    current_scp_warnings = current_scp_warnings or []
+    scp_flagged_ids = set()
+    for w in current_scp_warnings:
+        m = re.match(r"^([A-Za-z0-9]+)\s*\(", w)
+        if m:
+            scp_flagged_ids.add(m.group(1))
+
+    prior_block = ""
+    if prior_suggestions:
+        prior_list = "\n".join(f"- {s}" for s in prior_suggestions)
+        prior_block = f"""
+The PREVIOUS version of this template (before this turn's fix) had these flagged issues:
+{prior_list}
+
+If this turn's request addressed any of these, they are now RESOLVED — do not re-flag them unless you can point to the exact line in the CURRENT template below proving the issue still exists.
+"""
+
+    review_prompt = f"""You are reviewing a {("Terraform JSON" if fmt == "terraform_json" else "CloudFormation")} template you just generated...
+
+{prior_block}
+
+Original request:
+{request}
+
+Generated template:
+```{fence_lang}
+{template}
+```
+
+Reference schema rules:
+{rules_only}
+
+... [existing HARD RULES block unchanged] ...
+
+NEW HARD RULE — EVIDENCE REQUIRED: for every suggestion, you must first locate the specific resource/property in the CURRENT template text above that is missing or wrong. If you cannot point to a specific logical ID and property name that is absent or incorrect in the CURRENT template, do not include the suggestion. Never flag something based on memory of an earlier version.
+
+Rules for your answer:
+- If you find nothing worth flagging, respond with exactly: NONE
+- Otherwise, respond with a bullet list of AT MOST 5 items. Each item must be in this exact format:
+  - [LogicalId] issue description (at least 10 words)
+- Output nothing except NONE or the bullet list."""
+
+    try:
+        response = llm.invoke([HumanMessage(content=review_prompt)], temperature=0.1)
+        content = _strip_think_block(response.content)
+    except Exception as e:
+        print(f"WARNING: improvement review call failed, skipping: {e}")
+        return []
+
+    content = content.strip()
+    if _looks_degenerate(content):
+        print("WARNING: degenerate output detected in improvement review, skipping suggestions.")
+        return []
+    if not content or content.upper().startswith("NONE"):
+        return []
+
+    suggestions = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if line.startswith("- "):
+            text = line[2:].strip()
+        elif line.startswith("-"):
+            text = line[1:].strip()
+            text = text.lstrip("- ").strip()  # handle double-dash bullets like "-- [Id] ..."
+        else:
+            continue
+
+        text = re.sub(r'^[-\s]+', '', text)  # strips any leftover leading dash(es)/space(s), e.g. from "- - [Id] ..." model output
+
+        if len(text.split()) < 8:
+            print(f"WARNING: discarding suspiciously short 'suggestion': {text!r}")
+            continue
+        if text in template:
+            print(f"WARNING: discarding suggestion that's verbatim template text: {text!r}")
+            continue
+        quoted_spans = re.findall(r'`([^`]+)`', text)
+        intrinsic_spans = re.findall(r'(![A-Za-z]+(?:\s+[\w\.]+)+)', text)
+        all_spans = quoted_spans + intrinsic_spans
+        if len(all_spans) >= 2 and len(set(all_spans)) < len(all_spans):
+            print(f"WARNING: discarding suggestion with duplicate identical spans: {text!r}")
+            continue
+
+        # NEW: extract [LogicalId] tag and verify it actually exists in the template
+        m = re.match(r"^\[([A-Za-z0-9]+)\]\s*(.+)$", text)
+        if not m:
+            print(f"WARNING: discarding untagged suggestion (missing [LogicalId]): {text!r}")
+            continue
+        logical_id, desc = m.group(1), m.group(2)
+        resource_ids = set(re.findall(r'^  ([A-Za-z0-9]+):\s*$', template, flags=re.MULTILINE))
+        if not resource_ids:
+            resource_ids = set(re.findall(r'^\s{2}([A-Za-z0-9]+):\n\s{4}Type:', template, flags=re.MULTILINE))
+        if logical_id not in resource_ids:
+            print(f"WARNING: discarding suggestion referencing '{logical_id}', which is not an actual Resources logical ID in this template: {text!r}")
+            continue
+        text = desc # drop the tag for display
+        # NEW: cross-check root/wildcard-principal claims against the actual
+        # static SCP check — Nova Lite has flagged stale template Description
+        # text as if it were the current Principal value. Trust the static
+        # check over the model's own claim.
+        if "root" in text.lower() and logical_id not in scp_flagged_ids:
+            print(f"WARNING: discarding suggestion claiming root-principal issue for {logical_id}, which the static SCP check found compliant: {text!r}")
+            continue
+
+        # NEW: programmatic dedup against prior turn's suggestions
+        if _is_stale_suggestion(text, prior_suggestions):
+            print(f"WARNING: discarding stale/repeated suggestion: {text!r}")
+            continue
+
+        # NEW: discard suggestions that just echo the user's own fix request —
+        # a sign the model is repeating the problem statement instead of
+        # verifying whether the fix actually landed
+        if _is_stale_suggestion(text, [request]):
+            print(f"WARNING: discarding suggestion that echoes the user's own fix request: {text!r}")
+            continue
+
+        suggestions.append(text)
+
+    return suggestions[:5]
+
+
+def _is_stale_suggestion(new_text, prior_suggestions, threshold=0.6):
+    new_words = set(re.sub(r'[^\w\s]', '', new_text.lower()).split())
+    for prior in prior_suggestions:
+        prior_words = set(re.sub(r'[^\w\s]', '', prior.lower()).split())
+        if not new_words:
+            continue
+        overlap = len(new_words & prior_words) / len(new_words)
+        if overlap > threshold:
+            return True
+    return False
+
+def _generate_with_retry(llm, messages, fmt, max_retries=2):
+    """Call the LLM, detect degenerate output (pad tokens, repetition
+    loops, invalid JSON for the terraform_json format), and retry cleanly
+    instead of returning garbage to the user."""
+    last_content = ""
+    for attempt in range(max_retries + 1):
+        response = llm.invoke(messages)
+        # Strip the <think> block before any downstream checks so we're
+        # scanning the actual answer, not the model's reasoning trace.
+        content = _strip_think_block(response.content)
+        print(f"Attempt {attempt + 1} — raw response: {content[:300]}")
+
+        if _looks_degenerate(content):
+            print(f"WARNING: degenerate output detected on attempt {attempt + 1}, retrying...")
+            last_content = content
+            continue
+
+        if fmt == "terraform_json":
+            cleaned = _strip_fences(content)
+            try:
+                json.loads(cleaned)
+            except json.JSONDecodeError:
+                print(f"WARNING: invalid JSON on attempt {attempt + 1}, retrying...")
+                last_content = content
+                continue
+
+        return content
+
+    print("All retries produced bad output — returning last attempt as-is.")
+    return last_content
+
+
+def generate_template(request, embeddings, chat_history=None):
+    """Main template generation function. Supports both CloudFormation YAML
+    and Terraform JSON output, auto-detected from the request or from the
+    format of the last template in the conversation. Also supports
+    conversation memory so users can say 'fix this' or 'update the template'
+    without repasting it, and automatically retries if the model produces
+    degenerate output (common on free-tier models under load). CloudFormation
+    output additionally goes through a cfn-lint validation pass, static
+    role/trust-policy, SCP, DLQ-direction, and Parameter-default checks, and
+    an LLM repair pass (up to 2 rounds) to catch hallucinated/invalid
+    resource properties, cross-service role reuse, and account-SCP
+    violations before returning.
+
+    Also short-circuits bare 'yes'/'no' confirmation replies (answers to the
+    improvement-suggestion prompt) so they never reach retrieval or the LLM —
+    see _is_short_confirmation."""
+    try:
+        print(f"\nTemplate request: {request}")
+        print(f"DEBUG: template_chain.py loaded from {__file__}")
+
+        if chat_history is None:
+            chat_history = []
+
+        fmt = detect_format(request, chat_history)
+        print(f"Detected format: {fmt}")
+
+        # Short-circuit bare yes/no confirmations before any retrieval or
+        # LLM call. "no" returns the last template completely untouched.
+        # "yes" is not yet wired up — see the TODO below; it currently
+        # falls through to ValueError rather than silently regenerating.
+        if _is_short_confirmation(request):
+            last_template = get_last_template(chat_history, fmt=fmt)
+            if last_template is None:
+                raise ValueError("Got a yes/no reply but no prior template found in chat_history.")
+
+            normalized = request.strip().lower().rstrip(".!")
+            if normalized in ("no", "n"):
+                print("User declined suggestions — returning last template unchanged, no LLM call.")
+                return {
+                    "request": request,
+                    "template": last_template,
+                    "format": fmt,
+                    "sources": [],
+                    "chunks": [],
+                    "suggestions": []
+                }
+            else:
+                suggestions_to_apply = []
+                for hist_msg in reversed(chat_history):
+                    if (
+                        hist_msg.get("role") == "assistant"
+                        and hist_msg.get("type") == "template"
+                        and hist_msg.get("format", "cloudformation_yaml") == fmt
+                    ):
+                        suggestions_to_apply = hist_msg.get("suggestions", [])
+                        break
+
+                if not suggestions_to_apply:
+                    print("User confirmed 'yes' but no persisted suggestions were found for the last template — returning it unchanged.")
+                    return {
+                        "request": request,
+                        "template": last_template,
+                        "format": fmt,
+                        "sources": [],
+                        "chunks": [],
+                        "suggestions": []
+                    }
+
+                print(f"Applying {len(suggestions_to_apply)} confirmed suggestion(s) to last template...")
+                llm = get_llm()
+                rules = TERRAFORM_RULES if fmt == "terraform_json" else CLOUDFORMATION_RULES
+                rules_only = TERRAFORM_RULES_ONLY if fmt == "terraform_json" else CLOUDFORMATION_RULES_ONLY
+                fence_lang = "json" if fmt == "terraform_json" else "yaml"
+                suggestions_list = "\n".join(f"- {s}" for s in suggestions_to_apply)
+
+                apply_messages = [
+                    SystemMessage(content=rules),
+                    HumanMessage(content=f"""Here is the current template:
+
+```{fence_lang}
+{last_template}
+```
+
+Apply ONLY the following confirmed improvements. Do not make any other changes beyond what is needed to address these items:
+{suggestions_list}
+
+Return the COMPLETE corrected template with these changes applied. Output ONLY the {fence_lang.upper()} content, no explanation before or after.""")
+                ]
+
+                raw_applied = _generate_with_retry(llm, apply_messages, fmt, max_retries=1)
+                template = _strip_fences(raw_applied)
+                repair_status = "suggestions_applied"
+
+                if fmt == "terraform_json":
+                    try:
+                        json.loads(template)
+                    except json.JSONDecodeError as je:
+                        print(f"WARNING: template after applying suggestions did not parse cleanly: {je}")
+                else:
+                    template = re.sub(r'(Mode:\s+)(OFF|ON|YES|NO)(\s*$)', r'\1"\2"\3', template, flags=re.MULTILINE)
+                    template = re.sub(r'^(\s*)queryStringParameters(\s*:)', r'\1QueryStringParameters\2', template, flags=re.MULTILINE | re.IGNORECASE)
+                    template = _quote_colon_in_descriptions(template)
+                    template = _strip_unneeded_sub(template)
+                    template = _fix_redrive_policy_casing(template)
+                    template = _fix_pipe_sqs_source_parameters(template)
+                    template = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', template, flags=re.MULTILINE)
+                    template = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', template)
+                    template = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', template, flags=re.MULTILINE)
+
+                    is_valid, lint_errors, lint_ran = _validate_cloudformation(template)
+                    role_warnings = _check_role_principal_mismatch(template)
+                    scp_warnings = _check_scp_compliance(template)
+                    param_default_warnings = _check_invalid_parameter_defaults(template)
+                    dlq_warnings = _check_dlq_redrive_direction(template)
+
+                    needs_repair = (
+                        (lint_ran and not is_valid)
+                        or bool(role_warnings)
+                        or bool(scp_warnings)
+                        or bool(param_default_warnings)
+                        or bool(dlq_warnings)
+                    )
+
+                    if needs_repair:
+                        current_lint_errors = lint_errors if (lint_ran and not is_valid) else ""
+                        current_role_warnings = role_warnings
+                        current_scp_warnings = scp_warnings
+                        current_param_warnings = param_default_warnings
+                        current_dlq_warnings = dlq_warnings
+                        max_repair_rounds = 2
+
+                        for attempt in range(max_repair_rounds):
+                            combined_errors = current_lint_errors
+                            if current_role_warnings:
+                                combined_errors += (
+                                    "\n\nAdditional issues found by static analysis (role/trust-policy mismatches — "
+                                    "these will NOT show up in cfn-lint but WILL fail at deploy/runtime):\n"
+                                    + "\n".join(f"- {w}" for w in current_role_warnings)
+                                )
+                            if current_scp_warnings:
+                                combined_errors += (
+                                    "\n\nAdditional issues found by static analysis (account SCP violations — "
+                                    "these will NOT show up in cfn-lint but WILL be DENIED at deploy time):\n"
+                                    + "\n".join(f"- {w}" for w in current_scp_warnings)
+                                )
+                            if current_param_warnings:
+                                combined_errors += (
+                                    "\n\nAdditional issues found by static analysis (invalid Parameter.Default values — "
+                                    "cfn-lint will reject these, not just a deploy-time denial):\n"
+                                    + "\n".join(f"- {w}" for w in current_param_warnings)
+                                )
+                            if current_dlq_warnings:
+                                combined_errors += (
+                                    "\n\nAdditional issues found by static analysis (DLQ RedrivePolicy misconfiguration — "
+                                    "will NOT show up in cfn-lint but silently breaks message redrive at runtime):\n"
+                                    + "\n".join(f"- {w}" for w in current_dlq_warnings)
+                                )
+
+                            print(f"[yes-path] Repair attempt {attempt + 1}/{max_repair_rounds} for the following issues:\n{combined_errors}")
+                            repair_messages = apply_messages + [
+                                AIMessage(content=template),
+                                HumanMessage(content=f"""The template above has the following issues:
+
+{combined_errors}
+
+Return the COMPLETE corrected template with these issues fixed. Output ONLY the YAML content, no explanation.""")
+                            ]
+                            repaired = _generate_with_retry(llm, repair_messages, fmt, max_retries=1)
+                            repaired = _strip_fences(repaired)
+                            repaired = _quote_colon_in_descriptions(repaired)
+                            repaired = _strip_unneeded_sub(repaired)
+                            repaired = _fix_redrive_policy_casing(repaired)
+                            repaired = _fix_pipe_sqs_source_parameters(repaired)
+                            repaired = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', repaired, flags=re.MULTILINE)
+                            repaired = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', repaired)
+                            repaired = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', repaired, flags=re.MULTILINE)
+
+                            repair_unchanged = repaired.strip() == template.strip()
+                            if repair_unchanged:
+                                print(f"[yes-path] WARNING: repair attempt {attempt + 1} returned an unchanged template.")
+
+                            template = repaired
+
+                            still_valid, remaining_errors, repair_lint_ran = _validate_cloudformation(template)
+                            remaining_role_warnings = _check_role_principal_mismatch(template)
+                            remaining_scp_warnings = _check_scp_compliance(template)
+                            remaining_param_warnings = _check_invalid_parameter_defaults(template)
+                            remaining_dlq_warnings = _check_dlq_redrive_direction(template)
+
+                            if not repair_lint_ran:
+                                print(f"[yes-path] cfn-lint validation SKIPPED on repair attempt {attempt + 1}.")
+                                repair_status = "lint_skipped"
+                                break
+
+                            if (
+                                still_valid
+                                and not remaining_role_warnings
+                                and not remaining_scp_warnings
+                                and not remaining_param_warnings
+                                and not remaining_dlq_warnings
+                            ):
+                                print(f"[yes-path] Repair attempt {attempt + 1} succeeded.")
+                                repair_status = "unchanged_after_repair" if repair_unchanged else "repaired_clean"
+                                break
+
+                            current_lint_errors = remaining_errors if not still_valid else ""
+                            current_role_warnings = remaining_role_warnings
+                            current_scp_warnings = remaining_scp_warnings
+                            current_param_warnings = remaining_param_warnings
+                            current_dlq_warnings = remaining_dlq_warnings
+
+                            if repair_unchanged:
+                                print("[yes-path] Repair made no changes — stopping early.")
+                                repair_status = "repair_failed"
+                                break
+
+                            if attempt == max_repair_rounds - 1:
+                                print("[yes-path] WARNING: repair pass still has issues after max rounds, returning best attempt.")
+                                repair_status = "repair_failed"
+                    else:
+                        print("[yes-path] cfn-lint passed, no static-check warnings after applying suggestions.")
+
+                final_scp_warnings = _check_scp_compliance(template) if fmt != "terraform_json" else []
+                new_suggestions = _review_template_for_improvements(
+                    llm, template, request, fmt, rules_only, suggestions_to_apply, final_scp_warnings
+                )
+                if new_suggestions:
+                    print(f"[yes-path] New improvement suggestions after applying fixes: {new_suggestions}")
+                else:
+                    print("[yes-path] No further suggestions — template looks complete.")
+
+                return {
+                    "request": request,
+                    "template": template,
+                    "format": fmt,
+                    "sources": [],
+                    "chunks": [],
+                    "suggestions": new_suggestions,
+                    "repair_status": repair_status
+                }
+
+        # Retrieve relevant sample templates
+        print("Retrieving relevant sample templates...")
+        chunks, context = retrieve_and_format(request, embeddings)
+
+        # Initialize LLM
+        llm = get_llm()
+
+        # Build messages: system rules first (format-specific ruleset)
+        rules = TERRAFORM_RULES if fmt == "terraform_json" else CLOUDFORMATION_RULES
+        rules_only = TERRAFORM_RULES_ONLY if fmt == "terraform_json" else CLOUDFORMATION_RULES_ONLY
+        messages = [SystemMessage(content=rules)]
+
+        # Add recent conversation history so the model has context
+        # (skip giant template code blocks except the most recent one, to save tokens)
+        last_template = get_last_template(chat_history, fmt=fmt)
+
+        for msg in chat_history[-10:]:
+            if msg["role"] == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                if msg.get("type") == "template":
+                    msg_fmt_label = "Terraform JSON" if msg.get("format") == "terraform_json" else "CloudFormation"
+                    messages.append(AIMessage(content=f"[Generated a {msg_fmt_label} template - see below for latest version]"))
+                else:
+                    messages.append(AIMessage(content=msg.get("content", "")))
+
+        fence_lang = "json" if fmt == "terraform_json" else "yaml"
+        format_label = "Terraform JSON (.tf.json)" if fmt == "terraform_json" else "CloudFormation"
+
+        if fmt == "terraform_json":
+            critical_reminders = """- flexible_time_window.mode must be the plain string "OFF", not a boolean
+- All resource references must use "${resource_type.name.attribute}" interpolation syntax
+- Sensitive variables (API keys, tokens) must have "sensitive": true
+- aws_cloudwatch_event_connection auth_parameters must nest under "api_key": {"key": ..., "value": ...}
+- aws_cloudwatch_event_api_destination uses flat invocation_endpoint/http_method/invocation_rate_limit_per_second — no destination_config block
+- Output must be a single valid JSON object with no trailing commas or comments"""
+        else:
+            critical_reminders = """- FlexibleTimeWindow Mode must be written as Mode: "OFF" with quotes, never Mode: OFF
+- All YAML reserved words (OFF, ON, YES, NO, TRUE, FALSE) must be quoted when used as strings
+- All parameters without defaults must have descriptions with examples
+- ApiKeyValue must never be empty
+- Never use AWS::IAM::PolicyAttachment
+- Never reuse one IAM Role's RoleArn across two resources that need different trust-policy principals (e.g. a pipes.amazonaws.com-trusted role must never be used as a Rule target's RoleArn)"""
+
+        if last_template:
+            messages.append(HumanMessage(content=f"""For reference, here is the most recently generated/discussed {format_label} template:
+
+```{fence_lang}
+{last_template}
+```
+
+Sample templates for additional reference:
+{context}
+
+New request: {request}
+
+If this request asks to fix, update, or modify "the template", apply the changes to the template shown above and return the COMPLETE corrected template, not a partial diff.
+
+Critical reminders before you output:
+{critical_reminders}
+
+Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template" or any other sentence before or after it. Begin your response with the first line of the {fence_lang.upper()} itself:"""))
+        else:
+            messages.append(HumanMessage(content=f"""Generate a {format_label} template for the following request.
+Use the sample templates below as reference for patterns and structure.
+
+Sample templates for reference:
+{context}
+
+Request: {request}
+
+Critical reminders before you output:
+{critical_reminders}
+
+Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template" or any other sentence before or after it. Begin your response with the first line of the {fence_lang.upper()} itself:"""))
+
+        print("Generating template...")
+        raw_content = _generate_with_retry(llm, messages, fmt, max_retries=1)
+        print(f"Final raw response: {raw_content[:500]}")
+
+        template = _strip_fences(raw_content)
+
+        if fmt == "terraform_json":
+            try:
+                json.loads(template)
+            except json.JSONDecodeError as je:
+                print(f"WARNING: generated Terraform JSON did not parse cleanly: {je}")
+        else:
+            # --- deterministic auto-fixes, applied once, in order ---
+            template = re.sub(r'(Mode:\s+)(OFF|ON|YES|NO)(\s*$)', r'\1"\2"\3', template, flags=re.MULTILINE)
+            template = re.sub(r'^(\s*)queryStringParameters(\s*:)', r'\1QueryStringParameters\2', template, flags=re.MULTILINE | re.IGNORECASE)
+            template = _quote_colon_in_descriptions(template)
+            template = _strip_unneeded_sub(template)
+            template = _fix_redrive_policy_casing(template)
+            template = _fix_pipe_sqs_source_parameters(template)
+            # Nova Lite also sometimes omits the space between a key's colon and
+            # a quoted scalar value entirely, e.g. ConstraintDescription:'must be...'
+            # or KeyName:'my-key-pair' — invalid YAML, breaks parsing before any
+            # validation can run. Insert the missing space.
+            template = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', template, flags=re.MULTILINE)
+            # Nova Lite consistently omits the space between ":" and an intrinsic
+            # function tag (e.g. "Key:!Sub" instead of "Key: !Sub"), which is
+            # invalid YAML and breaks cfn-lint parsing entirely.
+            template = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', template)
+            template = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', template, flags=re.MULTILINE)
+            print(f"DEBUG: after colon-fix, sample line check: {[l for l in template.split(chr(10)) if ':!' in l][:3]}")
+
+            # --- validation + static checks, run once ---
+            is_valid, lint_errors, lint_ran = _validate_cloudformation(template)
+            role_warnings = _check_role_principal_mismatch(template)
+            scp_warnings = _check_scp_compliance(template)
+            param_default_warnings = _check_invalid_parameter_defaults(template)
+            dlq_warnings = _check_dlq_redrive_direction(template)
+
+            if not lint_ran:
+                print("cfn-lint validation SKIPPED (module not found in this interpreter) — output is unverified.")
+            if role_warnings:
+                print(f"Role/trust-policy mismatch(es) found:\n" + "\n".join(role_warnings))
+            if scp_warnings:
+                print(f"SCP compliance violation(s) found:\n" + "\n".join(scp_warnings))
+            if dlq_warnings:
+                print(f"DLQ redrive-direction issue(s) found:\n" + "\n".join(dlq_warnings))
+
+            needs_repair = (
+                (lint_ran and not is_valid)
+                or bool(role_warnings)
+                or bool(scp_warnings)
+                or bool(param_default_warnings)
+                or bool(dlq_warnings)
+            )
+            repair_status = "not_needed"
+
+            if needs_repair:
+                current_lint_errors = lint_errors if (lint_ran and not is_valid) else ""
+                current_role_warnings = role_warnings
+                current_scp_warnings = scp_warnings
+                current_param_warnings = param_default_warnings
+                current_dlq_warnings = dlq_warnings
+                max_repair_rounds = 2
+
+                for attempt in range(max_repair_rounds):
+                    combined_errors = current_lint_errors
+                    if current_role_warnings:
+                        combined_errors += (
+                            "\n\nAdditional issues found by static analysis (role/trust-policy mismatches — "
+                            "these will NOT show up in cfn-lint but WILL fail at deploy/runtime):\n"
+                            + "\n".join(f"- {w}" for w in current_role_warnings)
+                        )
+                    if current_scp_warnings:
+                        combined_errors += (
+                            "\n\nAdditional issues found by static analysis (account SCP violations — "
+                            "these will NOT show up in cfn-lint but WILL be DENIED at deploy time):\n"
+                            + "\n".join(f"- {w}" for w in current_scp_warnings)
+                        )
+                    if current_param_warnings:
+                        combined_errors += (
+                            "\n\nAdditional issues found by static analysis (invalid Parameter.Default values — "
+                            "cfn-lint will reject these, not just a deploy-time denial):\n"
+                            + "\n".join(f"- {w}" for w in current_param_warnings)
+                        )
+                    if current_dlq_warnings:
+                        combined_errors += (
+                            "\n\nAdditional issues found by static analysis (DLQ RedrivePolicy misconfiguration — "
+                            "will NOT show up in cfn-lint but silently breaks message redrive at runtime):\n"
+                            + "\n".join(f"- {w}" for w in current_dlq_warnings)
+                        )
+
+                    print(f"Repair attempt {attempt + 1}/{max_repair_rounds} for the following issues:\n{combined_errors}")
+                    repair_messages = messages + [
+                        AIMessage(content=template),
+                        HumanMessage(content=f"""The template above has the following issues:
+
+{combined_errors}
+
+Return the COMPLETE corrected template with these issues fixed. Output ONLY the YAML content, no explanation.""")
+                    ]
+                    repaired = _generate_with_retry(llm, repair_messages, fmt, max_retries=1)
+                    repaired = _strip_fences(repaired)
+                    repaired = _quote_colon_in_descriptions(repaired)
+                    repaired = _strip_unneeded_sub(repaired)
+                    repaired = _fix_redrive_policy_casing(repaired)
+                    repaired = _fix_pipe_sqs_source_parameters(repaired)
+                    repaired = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', repaired, flags=re.MULTILINE)
+                    repaired = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', repaired)
+                    repaired = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', repaired, flags=re.MULTILINE)
+
+                    repair_unchanged = repaired.strip() == template.strip()
+                    if repair_unchanged:
+                        print(f"WARNING: repair attempt {attempt + 1} returned an unchanged template — the model did not apply any fix.")
+
+                    template = repaired
+
+                    still_valid, remaining_errors, repair_lint_ran = _validate_cloudformation(template)
+                    remaining_role_warnings = _check_role_principal_mismatch(template)
+                    remaining_scp_warnings = _check_scp_compliance(template)
+                    remaining_param_warnings = _check_invalid_parameter_defaults(template)
+                    remaining_dlq_warnings = _check_dlq_redrive_direction(template)
+
+                    if not repair_lint_ran:
+                        print(f"cfn-lint validation SKIPPED on repair attempt {attempt + 1} — treating as unverified.")
+                        repair_status = "lint_skipped"
+                        break
+
+                    if (
+                        still_valid
+                        and not remaining_role_warnings
+                        and not remaining_scp_warnings
+                        and not remaining_param_warnings
+                        and not remaining_dlq_warnings
+                    ):
+                        print(f"Repair attempt {attempt + 1} succeeded — cfn-lint clean, no static-check warnings.")
+                        repair_status = "unchanged_after_repair" if repair_unchanged else "repaired_clean"
+                        break
+
+                    current_lint_errors = remaining_errors if not still_valid else ""
+                    current_role_warnings = remaining_role_warnings
+                    current_scp_warnings = remaining_scp_warnings
+                    current_param_warnings = remaining_param_warnings
+                    current_dlq_warnings = remaining_dlq_warnings
+
+                    if repair_unchanged:
+                        print("Repair made no changes — further rounds unlikely to help, stopping early.")
+                        repair_status = "repair_failed"
+                        break
+
+                    if attempt == max_repair_rounds - 1:
+                        if not still_valid:
+                            print(f"WARNING: repair pass still has cfn-lint errors after {max_repair_rounds} attempts, returning best attempt:\n{remaining_errors}")
+                        if remaining_role_warnings:
+                            print("WARNING: still has role/trust-policy mismatches, returning best attempt:\n" + "\n".join(remaining_role_warnings))
+                        if remaining_scp_warnings:
+                            print("WARNING: still has SCP violations, returning best attempt:\n" + "\n".join(remaining_scp_warnings))
+                        if remaining_param_warnings:
+                            print("WARNING: still has invalid Parameter.Default values, returning best attempt:\n" + "\n".join(remaining_param_warnings))
+                        if remaining_dlq_warnings:
+                            print("WARNING: still has DLQ redrive-direction issues, returning best attempt:\n" + "\n".join(remaining_dlq_warnings))
+                        repair_status = "repair_failed"
+            else:
+                print("cfn-lint passed, no role/trust-policy mismatches, SCP-compliant — no repair needed.")
+
+        sources = list(set([
+            chunk.metadata.get("source_file", "unknown")
+            for chunk in chunks
+        ]))
+
+        prior_suggestions = []
+        for msg in reversed(chat_history):
+            if msg.get("role") == "assistant" and msg.get("type") == "template":
+                prior_suggestions = msg.get("suggestions", [])
+                break
+
+        final_scp_warnings = _check_scp_compliance(template)
+        suggestions = _review_template_for_improvements(llm, template, request, fmt, rules_only, prior_suggestions, final_scp_warnings)
+        if suggestions:
+            print(f"Improvement suggestions found: {suggestions}")
+        else:
+            print("No improvement suggestions — template looks complete.")
+
+        print("Template generated successfully")
+        print(f"Sources used: {sources}")
+
+        return {
+            "request": request,
+            "template": template,
+            "format": fmt,
+            "sources": sources,
+            "chunks": chunks,
+            "suggestions": suggestions,
+            "repair_status": repair_status
+        }
+
+    except Exception as e:
+        print(f"Error generating template: {e}")
+        raise

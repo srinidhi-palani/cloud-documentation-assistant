@@ -1,18 +1,22 @@
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from retrieval.retriever import retrieve_and_format
-from config.config import OPENROUTER_API_KEY, LLM_MODEL
-
+from generation.template_chain import _strip_think_block  # shared Qwen <think> stripper
+from langchain_aws import ChatBedrock
+from config.config import BEDROCK_MODEL_ID, AWS_REGION, BEDROCK_PROFILE
+import boto3
 
 def get_llm():
-    llm = ChatOpenAI(
-        model=LLM_MODEL,
-        openai_api_key=OPENROUTER_API_KEY,
-        openai_api_base="https://openrouter.ai/api/v1",
-        temperature=0.3,
-        max_tokens=1024
+    session = boto3.Session(profile_name=BEDROCK_PROFILE)
+    llm = ChatBedrock(
+        model_id=BEDROCK_MODEL_ID,
+        region_name=AWS_REGION,
+        client=session.client("bedrock-runtime", region_name=AWS_REGION),
+        model_kwargs={
+            "temperature": 0.4,
+            "max_tokens": 4096,
+        }
     )
-    print(f"LLM initialized: {LLM_MODEL}")
+    print(f"LLM initialized: Bedrock {BEDROCK_MODEL_ID}")
     return llm
 
 
@@ -58,7 +62,9 @@ Context:
 
         print("Generating answer...")
         response = llm.invoke(messages)
-        answer = response.content
+        # Strip Qwen's <think> reasoning block so it never leaks into the
+        # answer shown to the user in Streamlit.
+        answer = _strip_think_block(response.content)
 
         sources = list(set([
             chunk.metadata.get("source_file", "unknown")

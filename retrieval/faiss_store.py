@@ -1,7 +1,15 @@
 import os
 import boto3
 from langchain_community.vectorstores import FAISS
-from config.config import S3_BUCKET, REGION, FAISS_INDEX_PATH
+from config.config import S3_BUCKET, REGION, FAISS_INDEX_PATH, S3_PROFILE
+
+
+def _get_s3_client():
+    """Always use the dedicated S3 account profile, never the default
+    credential chain — the default may resolve to a different account's
+    borrowed key (e.g. one only granted for Bedrock access)."""
+    session = boto3.Session(profile_name=S3_PROFILE)
+    return session.client("s3", region_name=REGION)
 
 
 def build_faiss_index(chunks, embeddings):
@@ -48,7 +56,7 @@ def save_faiss_index(vectorstore, index_path=FAISS_INDEX_PATH):
 def upload_faiss_to_s3(index_path=FAISS_INDEX_PATH, bucket=S3_BUCKET):
     """Upload FAISS index files to S3"""
     try:
-        s3 = boto3.client("s3", region_name=REGION)
+        s3 = _get_s3_client()
 
         faiss_file = os.path.join(index_path, "index.faiss")
         pkl_file = os.path.join(index_path, "index.pkl")
@@ -67,7 +75,7 @@ def upload_faiss_to_s3(index_path=FAISS_INDEX_PATH, bucket=S3_BUCKET):
 def download_faiss_from_s3(index_path="/tmp/faiss_index", bucket=S3_BUCKET):
     """Download FAISS index files from S3"""
     try:
-        s3 = boto3.client("s3", region_name=REGION)
+        s3 = _get_s3_client()
 
         os.makedirs(index_path, exist_ok=True)
 
