@@ -1,4 +1,4 @@
-﻿import re
+import re
 import json
 import boto3
 from langchain_aws import ChatBedrock
@@ -416,6 +416,35 @@ def _quote_colon_in_descriptions(template):
 
     return re.sub(r'^(\s*)(Description|ConstraintDescription):[ \t]+(.+)$', fix_line, template, flags=re.MULTILINE)
 
+def _fix_duplicate_parameter_descriptions(template):
+    """Nova Lite periodically emits two `Description:` lines inside the same
+    Parameter block -- one short one near the top, then a second later
+    (after AllowedValues) prefixed "Required. ..." per rule 17. Two mapping
+    keys with the same name is invalid YAML ('duplicate key'), which cfn-lint
+    reports as an E0000 parse error -- and confirmed unreliable for the LLM
+    repair pass to self-correct (a repair round returned the template
+    completely unchanged). Deterministically keep only the LAST Description
+    line in each Parameter block (usually the more complete "Required. ..."
+    one) and drop any earlier Description line(s) in that same block."""
+    match = re.search(r'^Parameters:\s*\n(.*?)(?=^\S|\Z)', template, flags=re.MULTILINE | re.DOTALL)
+    if not match:
+        return template
+    params_block = match.group(1)
+
+    param_blocks = re.split(r'(?=^  [A-Za-z0-9]+:\s*$)', params_block, flags=re.MULTILINE)
+
+    fixed_blocks = []
+    for block in param_blocks:
+        block_lines = block.split("\n")
+        desc_line_nums = [i for i, l in enumerate(block_lines) if re.match(r'^\s*Description:\s*.+$', l)]
+        if len(desc_line_nums) > 1:
+            keep_line = desc_line_nums[-1]
+            block_lines = [l for i, l in enumerate(block_lines) if not (i in desc_line_nums and i != keep_line)]
+            block = "\n".join(block_lines)
+        fixed_blocks.append(block)
+
+    new_params_block = "".join(fixed_blocks)
+    return template[:match.start(1)] + new_params_block + template[match.end(1):]
 
 def _fix_redrive_policy_casing(template):
     """RedrivePolicy is one of the few CloudFormation properties that's a raw
@@ -441,6 +470,27 @@ def _fix_pipe_sqs_source_parameters(template):
     template = re.sub(r'^(\s*)BatchingWindow(\s*:)', r'\1MaximumBatchingWindowInSeconds\2', template, flags=re.MULTILINE)
     return template
 
+def _fix_managed_policy_getatt_arn(template):
+    """Rule 20: AWS::IAM::ManagedPolicy has no "Arn" attribute in
+    Fn::GetAtt -- Ref returns the ARN instead. Nova Lite has repeatedly
+    emitted !GetAtt <ManagedPolicyId>.Arn (most often inside Outputs,
+    where it's easy to lose track of which resource type a logical ID
+    belongs to), which cfn-lint rejects at generation time (E6101) and
+    which the repair pass has proven unreliable at self-correcting.
+    Identify every AWS::IAM::ManagedPolicy logical ID in the template,
+    then deterministically rewrite any '!GetAtt <Id>.Arn' referencing one
+    of those IDs to '!Ref <Id>' instead."""
+    policy_ids = re.findall(
+        r'^  ([A-Za-z0-9]+):\s*\n\s*Type:\s*AWS::IAM::ManagedPolicy\b',
+        template, flags=re.MULTILINE
+    )
+    for pid in policy_ids:
+        template = re.sub(
+            rf'!GetAtt\s+{re.escape(pid)}\.Arn\b',
+            f'!Ref {pid}',
+            template
+        )
+    return template
 
 def _strip_unneeded_sub(template):
     """Fn::Sub with no ${...} inside is valid CloudFormation but triggers
@@ -856,6 +906,96 @@ def _check_dlq_redrive_direction(template):
 
     return warnings
 
+
+def _check_orphaned_redrive_policy(template):
+    """Static check for a confirmed generation bug: Nova Lite creates a THIRD,
+    disconnected AWS::SQS::Queue resource (e.g. 'SourceQueue1RedrivePolicy')
+    just to hold the RedrivePolicy, instead of putting RedrivePolicy directly
+    on the queue that is actually wired up as an AWS::Pipes::Pipe Source.
+    This passes cfn-lint (both queues are schema-valid) and passes
+    _check_dlq_redrive_direction (the RedrivePolicy points the right
+    direction, using the right !GetAtt.Arn form) -- but the DLQ is never
+    reachable at runtime, because the queue that actually receives messages
+    (the Pipe's Source) has no RedrivePolicy at all.
+
+    Two things get flagged:
+      1. A Pipe's actual Source queue has no RedrivePolicy, even though a
+         DLQ-looking resource exists somewhere in the template.
+      2. A queue has a RedrivePolicy but is never referenced as any Pipe's
+         Source -- i.e. it's a phantom resource, disconnected from the real
+         message flow.
+    """
+    import yaml as pyyaml
+    try:
+        doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+    except Exception as e:
+        print(f"WARNING: orphaned-redrive-policy check skipped, template did not parse: {e}")
+        return []
+
+    if not isinstance(doc, dict):
+        return []
+
+    resources = doc.get("Resources", {}) or {}
+    warnings = []
+
+    def looks_like_dlq(logical_id, res):
+        name_field = str((res.get("Properties", {}) or {}).get("QueueName", ""))
+        haystack = (logical_id + " " + name_field).lower()
+        return "dlq" in haystack or "deadletter" in haystack or "dead-letter" in haystack
+
+    # Every AWS::SQS::Queue that carries a RedrivePolicy directly.
+    queues_with_redrive = {
+        name for name, res in resources.items()
+        if isinstance(res, dict)
+        and res.get("Type") == "AWS::SQS::Queue"
+        and isinstance((res.get("Properties", {}) or {}).get("RedrivePolicy"), dict)
+    }
+
+    # Every AWS::SQS::Queue that looks like a DLQ by name.
+    dlq_like_ids = {
+        name for name, res in resources.items()
+        if isinstance(res, dict) and res.get("Type") == "AWS::SQS::Queue" and looks_like_dlq(name, res)
+    }
+
+    # Resolve each Pipe's actual Source queue logical ID from the parsed
+    # (tag-stripped) doc -- after stripping, !GetAtt X.Arn and !Ref X both
+    # collapse to bare strings, so split on "." to get the logical ID.
+    pipe_source_ids = set()
+    for name, res in resources.items():
+        if not isinstance(res, dict) or res.get("Type") != "AWS::Pipes::Pipe":
+            continue
+        props = res.get("Properties", {}) or {}
+        source_val = props.get("Source")
+        if not isinstance(source_val, str):
+            continue
+        source_id = source_val.split(".")[0].strip()
+        pipe_source_ids.add(source_id)
+
+    for source_id in pipe_source_ids:
+        source_res = resources.get(source_id)
+        if not isinstance(source_res, dict):
+            continue
+        has_redrive = isinstance((source_res.get("Properties", {}) or {}).get("RedrivePolicy"), dict)
+        if not has_redrive and dlq_like_ids:
+            warnings.append(
+                f"{source_id} is used as an AWS::Pipes::Pipe Source but has no RedrivePolicy, even though "
+                f"a Dead Letter Queue-like resource ({', '.join(sorted(dlq_like_ids))}) exists in this "
+                f"template. RedrivePolicy must be set directly on {source_id} (pointing at the DLQ's ARN "
+                f"via !GetAtt), not on a separate queue -- otherwise the DLQ is never reachable at runtime."
+            )
+
+    for name in queues_with_redrive:
+        if name not in pipe_source_ids and name not in dlq_like_ids:
+            warnings.append(
+                f"{name} has a RedrivePolicy but is never referenced as any AWS::Pipes::Pipe's Source -- "
+                f"it is a disconnected/phantom queue. RedrivePolicy has no effect unless it is set on the "
+                f"queue that actually receives messages (the Pipe's Source). Remove {name} and move its "
+                f"RedrivePolicy onto the real source queue instead."
+            )
+
+    return warnings
+
+
 def _check_fabricated_managed_policy_arns(template):
     """Static check for a recurring hallucination: Nova Lite building an
     AWS-managed policy ARN using !Sub "${AWS::AccountId}" instead of the
@@ -880,6 +1020,52 @@ def _check_fabricated_managed_policy_arns(template):
             f"segment from ${{AWS::AccountId}} to the literal string 'aws', e.g. "
             f"arn:aws:iam::aws:policy/service-role/{policy_name}."
         )
+    return warnings
+
+VALID_LOG_RETENTION_DAYS = [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+
+def _check_invalid_log_retention_days(template):
+    """AWS::Logs::LogGroup RetentionInDays only accepts a fixed enum of
+    values. Nova Lite has typo'd this list inside a Parameter's
+    AllowedValues (e.g. 548 instead of 545), which cfn-lint catches
+    (W1030) but the repair pass has proven unreliable at fixing since the
+    error message alone doesn't name which specific value is wrong. Scan
+    every Parameter feeding a LogGroup's RetentionInDays for AllowedValues
+    entries outside the valid enum, and surface the bad value explicitly."""
+    import yaml as pyyaml
+    try:
+        doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+    except Exception as e:
+        print(f"WARNING: log-retention-days check skipped, template did not parse after tag-stripping: {e}")
+        return []
+    if not isinstance(doc, dict):
+        return []
+
+    resources = doc.get("Resources", {}) or {}
+    retention_param_names = set()
+    for name, res in resources.items():
+        if not isinstance(res, dict) or res.get("Type") != "AWS::Logs::LogGroup":
+            continue
+        retention = (res.get("Properties", {}) or {}).get("RetentionInDays")
+        if isinstance(retention, str):
+            retention_param_names.add(retention)
+
+    warnings = []
+    params = doc.get("Parameters", {}) or {}
+    for pname in retention_param_names:
+        param = params.get(pname)
+        if not isinstance(param, dict):
+            continue
+        allowed = param.get("AllowedValues")
+        if not isinstance(allowed, list):
+            continue
+        bad = [v for v in allowed if v not in VALID_LOG_RETENTION_DAYS]
+        if bad:
+            warnings.append(
+                f"Parameter {pname} (used as RetentionInDays) has invalid AllowedValues {bad} -- "
+                f"AWS::Logs::LogGroup RetentionInDays only accepts one of {VALID_LOG_RETENTION_DAYS}. "
+                f"Replace the invalid value(s) with the correct one from that list."
+            )
     return warnings
 
 def _check_api_destination_missing_connection(template):
@@ -985,6 +1171,10 @@ def _suggestion_claims_missing_but_present(text, logical_id, template):
     negative_markers = [
         "does not have", "doesn't have", "does not include", "doesn't include",
         "is missing", "lacks", "missing the", "is empty", "block is empty",
+        "not correctly formatted", "incorrectly formatted", "is malformed",
+        "not formatted correctly", "not nested correctly", "incorrectly nested",
+        "does not explicitly", "not explicitly stated", "does not specify",
+        "does not state", "does not mention", "not explicitly state",
     ]
     if not any(m in lower for m in negative_markers):
         return False
@@ -1014,16 +1204,28 @@ def _suggestion_claims_missing_but_present(text, logical_id, template):
         if re.search(rf'{re.escape(token)}\s*:', resource_block):
             return True
 
+    # NEW: the two checks above only catch multi-capital PascalCase tokens
+    # (e.g. RequestParameters) or exact quoted strings. A single-capital
+    # property name like "Principal" or "Effect" matches neither, so a
+    # claim like "does not have a Principal matching the service" slips
+    # through even when Principal: is right there in the resource's own
+    # block. Instead of guessing tokens from the suggestion text, pull the
+    # actual YAML property keys that exist in this resource's own block and
+    # check whether any of them is named as a whole word in the suggestion.
+    resource_prop_names = set(re.findall(r'^\s+([A-Za-z][A-Za-z0-9]*)\s*:', resource_block, flags=re.MULTILINE))
+    for prop in resource_prop_names:
+        if len(prop) >= 4 and re.search(rf'\b{re.escape(prop)}\b', text):
+            return True
+
     # Special case: claims that an IAM role lacks CloudWatch Logs
     # permission, when it already has the AWS-managed basic-execution
     # policy (which grants exactly that) or an inline logs: statement.
-    if "cloudwatch" in lower and "log" in lower and ("polic" in lower or "permission" in lower):
+    if "log" in lower and ("polic" in lower or "permission" in lower):
         if "LambdaBasicExecutionRole" in resource_block or re.search(r'logs:(CreateLogGroup|CreateLogStream|PutLogEvents)', resource_block):
             return True
 
     return False
 
-
 def _suggestion_evidence_contradicts_issue(evidence, desc):
     """Catch the case where the model quotes a REAL line from the template
     (passes the verbatim EVIDENCE check) but then asserts something false
@@ -1042,28 +1244,173 @@ def _suggestion_evidence_contradicts_issue(evidence, desc):
         claimed_value = should_specify.group(1).strip('."\'')
         if claimed_value and claimed_value.lower() in evidence_lower:
             return True
+
+    # NEW: claims the evidence shows a "wildcard" Resource/permission when
+    # the quoted evidence contains no '*' at all. Nova Lite has flagged
+    # explicit, scoped ARN lists (e.g. a Resource list of !GetAtt entries)
+    # as if they were wildcarded, with no wildcard character anywhere in
+    # the actual quoted line.
+    if "wildcard" in desc_lower and "*" not in evidence:
+        return True
+
+    # NEW: claims the evidence shows an underscore in a Logical ID when the
+    # quoted evidence contains no '_' at all. Nova Lite has flagged plain
+    # alphanumeric Logical IDs (e.g. "SourceQueue1") as containing an
+    # underscore with no underscore character anywhere in the actual
+    # quoted line.
+    if "underscore" in desc_lower and "_" not in evidence:
+        return True
 
     return False
 
-def _suggestion_evidence_contradicts_issue(evidence, desc):
-    """Catch the case where the model quotes a REAL line from the template
-    (passes the verbatim EVIDENCE check) but then asserts something false
-    about it â€” e.g. calling a !Ref/!Sub-based value 'hardcoded', or saying
-    a property 'should specify X' when the quoted evidence already contains
-    X. This is a self-contradiction detectable purely from the evidence and
-    issue text themselves, no template lookup needed."""
-    desc_lower = desc.lower()
-    evidence_lower = evidence.lower()
 
-    if "hardcod" in desc_lower and ("!ref" in evidence_lower or "!sub" in evidence_lower):
-        return True
-
-    should_specify = re.search(r'should (?:specify|use|include|reference)\s+["\']?([\w.:/-]{3,})["\']?', desc, re.IGNORECASE)
-    if should_specify:
-        claimed_value = should_specify.group(1).strip('."\'')
-        if claimed_value and claimed_value.lower() in evidence_lower:
+def _suggestion_is_vague_unfalsifiable_claim(desc):
+    """Reject suggestions that assert something is 'not the correct way' or
+    'incorrect way to reference' a resource without naming a concrete
+    alternative. A claim like 'RoleArn references the role ARN directly,
+    which is not the correct way to reference the role in this context' is
+    unfalsifiable as written -- !GetAtt <Id>.Arn IS the standard, correct
+    way to reference a role's ARN, and the suggestion never says what the
+    supposedly-correct way would be. Only reject when no specific
+    alternative mechanism is named, so a suggestion that DOES propose a
+    concrete fix (e.g. 'should use !Ref instead of !GetAtt') still gets
+    through for the evidence-contradiction check above to evaluate."""
+    lower = desc.lower()
+    if re.search(r'not the correct way', lower) or re.search(r'incorrect way to reference', lower):
+        if not re.search(r'\b(should use|instead use|should instead|via\s+\S+|should be\s+\S+)\b', lower):
             return True
+    return False
 
+
+def _suggestion_falsely_claims_self_reference(logical_id, evidence, desc):
+    """Reject suggestions asserting a resource's RedrivePolicy (or similar)
+    'references its own logical ID' / creates a 'circular dependency', when
+    the quoted EVIDENCE doesn't actually show that self-reference. Nova
+    Lite has quoted a bare property line (e.g. just 'RedrivePolicy:' with
+    no target) as if it proved a self-reference, when the real target
+    (visible elsewhere in the resource's block) points at a DIFFERENT
+    resource -- e.g. the DLQ, not itself. Only trust the claim if the
+    quoted evidence itself contains !Ref/!GetAtt <this same logical_id>."""
+    lower = desc.lower()
+    if "circular dependency" not in lower and "references its own logical id" not in lower:
+        return False
+    if re.search(rf'!(ref|getatt)\s+{re.escape(logical_id)}\b', evidence, re.IGNORECASE):
+        return False  # evidence genuinely shows the resource referencing itself
+    return True
+
+
+def _suggestion_confuses_ref_for_sqs_arn(desc, template):
+    """Reject suggestions claiming !Ref returns (or should be used to get)
+    the ARN of an AWS::SQS::Queue. For AWS::SQS::Queue, !Ref returns the
+    queue URL, not the ARN -- !GetAtt <Id>.Arn is the only way to get the
+    ARN. Nova Lite has repeatedly proposed replacing a correct !GetAtt
+    <Id>.Arn reference with !Ref on the grounds that '!Ref returns the full
+    ARN', which is backwards for this resource type. Applying this
+    suggestion would silently break whatever consumes the value (Pipe
+    Source/Target, an IAM policy Resource, etc.) by feeding it a URL where
+    an ARN is required."""
+    lower = desc.lower()
+    ref_arn_claim = re.search(r'!ref\b.{0,80}\barn\b', lower) or re.search(r'\barn\b.{0,80}!ref\b', lower)
+    if not ref_arn_claim:
+        return False
+    import yaml as pyyaml
+    try:
+        doc = pyyaml.safe_load(_strip_cfn_intrinsic_tags(template))
+    except Exception:
+        return False
+    if not isinstance(doc, dict):
+        return False
+    resources = doc.get("Resources", {}) or {}
+    sqs_ids = {
+        name for name, res in resources.items()
+        if isinstance(res, dict) and res.get("Type") == "AWS::SQS::Queue"
+    }
+    return any(re.search(rf'\b{re.escape(qid)}\b', desc) for qid in sqs_ids)
+
+
+def _suggestion_proposes_invalid_pipe_desired_state(desc):
+    """Reject suggestions proposing DesiredState: ENABLED (or any value
+    other than RUNNING/STOPPED) for AWS::Pipes::Pipe. Per AWS's own
+    CloudFormation docs, AWS::Pipes::Pipe.DesiredState only allows RUNNING
+    or STOPPED -- ENABLED is not a valid value for this resource type.
+    Nova Lite appears to confuse this with AWS::Events::Rule.State (which
+    DOES use ENABLED/DISABLED) or similar ENABLED/DISABLED-style enums
+    elsewhere in CloudFormation. Applying this suggestion would replace a
+    valid DesiredState with one CloudFormation rejects at deploy time."""
+    lower = desc.lower()
+    if "desiredstate" not in lower or "pipe" not in lower:
+        return False
+    proposed = re.search(r'(?:set to|should be)\s+"?(\w+)"?', lower)
+    if proposed and proposed.group(1) not in ("running", "stopped"):
+        return True
+    return False
+
+
+def _suggestion_proposes_wrong_pipes_service_principal(desc):
+    """Reject suggestions proposing a service principal other than
+    pipes.amazonaws.com for an AWS::Pipes::Pipe execution role's trust
+    policy. Per AWS's own docs (eb-pipes-permissions.html,
+    eb-pipes-event-target.html), EventBridge Pipes uses exactly the IAM
+    principal pipes.amazonaws.com -- there is no
+    pipes.eventbridge.amazonaws.com or similar variant. Only rejects when
+    pipes.amazonaws.com is named as the value being REPLACED (i.e. appears
+    right after "instead of"), so a suggestion that correctly proposes
+    FIXING a wrong principal TO pipes.amazonaws.com still passes through."""
+    lower = desc.lower()
+    m = re.search(r'instead of (?:just\s+)?"?pipes\.amazonaws\.com"?', lower)
+    if not m:
+        return False
+    before = lower[:m.start()]
+    proposed = re.findall(r'"([a-z0-9.\-]+)"', before)
+    for p in proposed:
+        if p != "pipes.amazonaws.com" and p.endswith(".amazonaws.com"):
+            return True
+    return False
+
+
+def _suggestion_proposes_replacing_source_with_sqsqueueparameters(desc):
+    """Reject suggestions proposing that AWS::Pipes::Pipe's Source property
+    'use SqsQueueParameters instead of' a direct ARN reference.
+    SourceParameters.SqsQueueParameters has no field for specifying WHICH
+    queue to read from -- it only carries extra config like BatchSize and
+    MaximumBatchingWindowInSeconds. Source itself (the ARN) is the only way
+    to specify the queue; SqsQueueParameters is an optional sibling
+    property, not a replacement for Source. This suggestion is
+    structurally incoherent -- there is no way to express "which queue"
+    inside SqsQueueParameters."""
+    lower = desc.lower()
+    if "source" not in lower or "sqsqueueparameters" not in lower:
+        return False
+    if re.search(r'source.{0,60}should use sqsqueueparameters', lower) or \
+       re.search(r'sqsqueueparameters instead of.{0,60}(arn|source)', lower):
+        return True
+    return False
+
+
+def _suggestion_claims_unneeded_yaml_quoting(desc):
+    """Reject suggestions claiming a plain alphanumeric value 'must be
+    quoted to avoid YAML parsing issues' when it doesn't actually need
+    quoting. YAML only treats a small set of reserved words (true/false/
+    yes/no/on/off/null) and numeric-looking or special-character values as
+    ambiguous without quotes -- an ordinary word like RUNNING parses as a
+    plain string either way. If cfn-lint just validated the unquoted
+    template clean, that's direct proof there's no real parsing issue."""
+    lower = desc.lower()
+    if "yaml parsing" not in lower:
+        return False
+    m = re.search(r'quoted as a string\s+"([^"]+)"', desc, re.IGNORECASE)
+    if not m:
+        return False
+    value = m.group(1)
+    yaml_ambiguous_words = {"true", "false", "yes", "no", "on", "off", "null", "~"}
+    if value.lower() in yaml_ambiguous_words:
+        return False
+    if re.match(r'^-?\d+(\.\d+)?$', value):
+        return False
+    if re.search(r'[:{}\[\],&*#?|<>=!%@`]', value):
+        return False
+    if re.match(r'^[A-Za-z_][A-Za-z0-9_\-]*$', value):
+        return True
     return False
 
 
@@ -1120,6 +1467,29 @@ def _suggestion_proposes_fabricated_arn_format(text):
         return True
     return False
 
+def _suggestion_contradicts_known_rules(text):
+    """Reject suggestions that contradict rules 9, 20, or 30 -- cases where
+    Nova Lite's self-review proposes 'fixing' something into a form that is
+    itself wrong per the reference schema rules. Catches: (rule 9) proposing
+    ApiKeyName/ApiKeyValue directly under AuthParameters instead of nested
+    under ApiKeyAuthParameters; (rule 20) proposing !GetAtt <Id>.Arn on an
+    AWS::IAM::ManagedPolicy (ManagedPolicy has no Arn attribute -- must use
+    !Ref); (rule 30) proposing an events!connection ARN built from !Ref
+    <ConnectionLogicalId> interpolated as a bare name rather than the literal
+    connection Name string."""
+    lower = text.lower()
+
+    if "apikeyauthparameters" not in lower and ("apikeyname" in lower or "apikeyvalue" in lower):
+        if "authparameters" in lower:
+            return True
+
+    if "managedpolicy" in lower and re.search(r'!getatt\s+\w+\.arn', lower):
+        return True
+
+    if "events!connection" in lower and re.search(r'!ref\s+\w+', lower):
+        return True
+
+    return False
 
 def _review_template_for_improvements(llm, template, request, fmt, rules_only, prior_suggestions=None, current_scp_warnings=None):
     """..."""
@@ -1240,6 +1610,15 @@ Rules for your answer:
             continue
         evidence, desc = evidence_match.group(1).strip(), evidence_match.group(2).strip()
 
+        # DIAGNOSTIC: confirm whether the model's [LogicalId] tag actually
+        # matches the resource its own ISSUE text talks about. If the tag
+        # names a DIFFERENT resource than the prose (e.g. tagged [Pipe1] but
+        # the text says "Pipe1Role does not have..."), every downstream
+        # check that scopes to "the tagged resource's own block" -- like
+        # _suggestion_claims_missing_but_present -- silently looks at the
+        # wrong block and misses a real hallucination.
+        print(f"DEBUG suggestion tag check: logical_id={logical_id!r} evidence={evidence[:80]!r} desc={desc[:120]!r}")
+
         def _normalize_ws(s):
             return re.sub(r'\s+', ' ', s.strip())
 
@@ -1264,6 +1643,30 @@ Rules for your answer:
             continue
         if _suggestion_proposes_fabricated_arn_format(text):
             print(f"WARNING: discarding suggestion proposing a fabricated ARN format: {text!r}")
+            continue
+        if _suggestion_contradicts_known_rules(text):
+            print(f"WARNING: discarding suggestion contradicting known rules 9/20/30: {text!r}")
+            continue
+        if _suggestion_is_vague_unfalsifiable_claim(text):
+            print(f"WARNING: discarding vague/unfalsifiable suggestion (no concrete alternative named): {text!r}")
+            continue
+        if _suggestion_falsely_claims_self_reference(logical_id, evidence, text):
+            print(f"WARNING: discarding suggestion falsely claiming {logical_id} references itself/circular dependency: {text!r}")
+            continue
+        if _suggestion_confuses_ref_for_sqs_arn(text, template):
+            print(f"WARNING: discarding suggestion confusing !Ref for an SQS queue's ARN (Ref returns the URL, not the ARN): {text!r}")
+            continue
+        if _suggestion_proposes_invalid_pipe_desired_state(text):
+            print(f"WARNING: discarding suggestion proposing an invalid DesiredState value for AWS::Pipes::Pipe (only RUNNING/STOPPED are valid): {text!r}")
+            continue
+        if _suggestion_proposes_wrong_pipes_service_principal(text):
+            print(f"WARNING: discarding suggestion proposing a fabricated service principal in place of the correct pipes.amazonaws.com: {text!r}")
+            continue
+        if _suggestion_proposes_replacing_source_with_sqsqueueparameters(text):
+            print(f"WARNING: discarding suggestion proposing to replace Pipe Source with SqsQueueParameters (structurally cannot express the queue reference): {text!r}")
+            continue
+        if _suggestion_claims_unneeded_yaml_quoting(text):
+            print(f"WARNING: discarding suggestion claiming unnecessary YAML quoting is required (value is not YAML-ambiguous): {text!r}")
             continue
 
 
@@ -1478,6 +1881,7 @@ Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template
             template = _strip_unneeded_sub(template)
             template = _fix_redrive_policy_casing(template)
             template = _fix_pipe_sqs_source_parameters(template)
+            template = _fix_managed_policy_getatt_arn(template)
             # Nova Lite also sometimes omits the space between a key's colon and
             # a quoted scalar value entirely, e.g. ConstraintDescription:'must be...'
             # or KeyName:'my-key-pair' Ã¢â‚¬â€ invalid YAML, breaks parsing before any
@@ -1496,6 +1900,8 @@ Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template
             scp_warnings = _check_scp_compliance(template)
             param_default_warnings = _check_invalid_parameter_defaults(template)
             dlq_warnings = _check_dlq_redrive_direction(template)
+            orphaned_redrive_warnings = _check_orphaned_redrive_policy(template)
+            retention_warnings = _check_invalid_log_retention_days(template)
             arn_warnings = _check_fabricated_managed_policy_arns(template)
             connection_warnings = _check_api_destination_missing_connection(template)
 
@@ -1507,6 +1913,10 @@ Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template
                 print(f"SCP compliance violation(s) found:\n" + "\n".join(scp_warnings))
             if dlq_warnings:
                 print(f"DLQ redrive-direction issue(s) found:\n" + "\n".join(dlq_warnings))
+            if orphaned_redrive_warnings:
+                print(f"Orphaned/phantom RedrivePolicy issue(s) found:\n" + "\n".join(orphaned_redrive_warnings))
+            if retention_warnings:
+                print(f"Invalid log retention day(s) found:\n" + "\n".join(retention_warnings))
             if arn_warnings:
                 print(f"Fabricated managed-policy ARN(s) found:\n" + "\n".join(arn_warnings))
             if connection_warnings:
@@ -1518,6 +1928,8 @@ Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template
                 or bool(scp_warnings)
                 or bool(param_default_warnings)
                 or bool(dlq_warnings)
+                or bool(orphaned_redrive_warnings)
+                or bool(retention_warnings)
                 or bool(arn_warnings)
                 or bool(connection_warnings)
             )
@@ -1529,6 +1941,8 @@ Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template
                 current_scp_warnings = scp_warnings
                 current_param_warnings = param_default_warnings
                 current_dlq_warnings = dlq_warnings
+                current_orphaned_redrive_warnings = orphaned_redrive_warnings
+                current_retention_warnings = retention_warnings
                 current_arn_warnings = arn_warnings
                 current_connection_warnings = connection_warnings
                 max_repair_rounds = 2
@@ -1555,9 +1969,21 @@ Output ONLY the {fence_lang.upper()} content. Do not write "Here is the template
                         )
                     if current_dlq_warnings:
                         combined_errors += (
-                            "\n\nAdditional issues found by static analysis (DLQ RedrivePolicy misconfiguration Ã¢â‚¬â€ "
+                            "\n\nAdditional issues found by static analysis (DLQ RedrivePolicy misconfiguration — "
                             "will NOT show up in cfn-lint but silently breaks message redrive at runtime):\n"
                             + "\n".join(f"- {w}" for w in current_dlq_warnings)
+                        )
+                    if current_orphaned_redrive_warnings:
+                        combined_errors += (
+                            "\n\nAdditional issues found by static analysis (orphaned/phantom RedrivePolicy -- "
+                            "will NOT show up in cfn-lint but the DLQ is silently unreachable at runtime):\n"
+                            + "\n".join(f"- {w}" for w in current_orphaned_redrive_warnings)
+                        )
+                    if current_retention_warnings:
+                        combined_errors += (
+                            "\n\nAdditional issues found by static analysis (invalid LogGroup RetentionInDays "
+                            "AllowedValues -- cfn-lint WILL reject these, not just a deploy-time issue):\n"
+                            + "\n".join(f"- {w}" for w in current_retention_warnings)
                         )
                     if current_arn_warnings:
                         combined_errors += (
@@ -1588,6 +2014,7 @@ Return the COMPLETE corrected template with these issues fixed. Output ONLY the 
                     repaired = _strip_unneeded_sub(repaired)
                     repaired = _fix_redrive_policy_casing(repaired)
                     repaired = _fix_pipe_sqs_source_parameters(repaired)
+                    repaired = _fix_managed_policy_getatt_arn(repaired)
                     repaired = re.sub(r'^(\s*[A-Za-z][\w]*):([\'"])', r'\1: \2', repaired, flags=re.MULTILINE)
                     repaired = re.sub(r'(:)(!(?:Sub|GetAtt|Ref|Join|Select|Split|If|Not|Equals|Condition))', r'\1 \2', repaired)
                     repaired = re.sub(r'^(\s*-)(!(?:Sub|GetAtt|Ref|Join|Select|Split))', r'\1 \2', repaired, flags=re.MULTILINE)
@@ -1603,6 +2030,8 @@ Return the COMPLETE corrected template with these issues fixed. Output ONLY the 
                     remaining_scp_warnings = _check_scp_compliance(template)
                     remaining_param_warnings = _check_invalid_parameter_defaults(template)
                     remaining_dlq_warnings = _check_dlq_redrive_direction(template)
+                    remaining_orphaned_redrive_warnings = _check_orphaned_redrive_policy(template)
+                    remaining_retention_warnings = _check_invalid_log_retention_days(template)
                     remaining_arn_warnings = _check_fabricated_managed_policy_arns(template)
                     remaining_connection_warnings = _check_api_destination_missing_connection(template)
 
@@ -1617,6 +2046,8 @@ Return the COMPLETE corrected template with these issues fixed. Output ONLY the 
                         and not remaining_scp_warnings
                         and not remaining_param_warnings
                         and not remaining_dlq_warnings
+                        and not remaining_orphaned_redrive_warnings
+                        and not remaining_retention_warnings
                         and not remaining_arn_warnings
                         and not remaining_connection_warnings
                     ):
@@ -1629,6 +2060,8 @@ Return the COMPLETE corrected template with these issues fixed. Output ONLY the 
                     current_scp_warnings = remaining_scp_warnings
                     current_param_warnings = remaining_param_warnings
                     current_dlq_warnings = remaining_dlq_warnings
+                    current_orphaned_redrive_warnings = remaining_orphaned_redrive_warnings
+                    current_retention_warnings = remaining_retention_warnings
                     current_arn_warnings = remaining_arn_warnings
                     current_connection_warnings = remaining_connection_warnings
 
@@ -1648,6 +2081,10 @@ Return the COMPLETE corrected template with these issues fixed. Output ONLY the 
                             print("WARNING: still has invalid Parameter.Default values, returning best attempt:\n" + "\n".join(remaining_param_warnings))
                         if remaining_dlq_warnings:
                             print("WARNING: still has DLQ redrive-direction issues, returning best attempt:\n" + "\n".join(remaining_dlq_warnings))
+                        if remaining_orphaned_redrive_warnings:
+                            print("WARNING: still has orphaned/phantom RedrivePolicy issues, returning best attempt:\n" + "\n".join(remaining_orphaned_redrive_warnings))
+                        if remaining_retention_warnings:
+                            print("WARNING: still has invalid log retention days, returning best attempt:\n" + "\n".join(remaining_retention_warnings))
                         if remaining_arn_warnings:
                             print("WARNING: still has fabricated managed-policy ARNs, returning best attempt:\n" + "\n".join(remaining_arn_warnings))
                         if remaining_connection_warnings:
