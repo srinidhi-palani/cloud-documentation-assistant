@@ -282,7 +282,7 @@ def get_llm():
         model_id=BEDROCK_MODEL_ID,
         region_name=AWS_REGION,
         client=session.client("bedrock-runtime", region_name=AWS_REGION),
-        model_kwargs={"temperature": 0.4, "max_tokens": 4096},
+        model_kwargs={"temperature": 0.4, "max_tokens": 8192},
     )
     print(f"LLM initialized: Bedrock {BEDROCK_MODEL_ID}")
     return llm
@@ -1281,6 +1281,28 @@ def _suggestion_is_vague_unfalsifiable_claim(desc):
             return True
     return False
 
+def _suggestion_self_certifies_as_correct(desc):
+    """Reject suggestions that assert the template's current property
+    or approach is already correct, even though they're still framed as
+    an issue to fix. Real example seen live: 'ManagedPolicy has no Arn
+    attribute; use !Ref to get the ARN, which is correct here, but rule
+    20 clarifies this is the only valid approach.' The suggestion names
+    no change to make -- it just re-describes existing, correct behavior.
+    Applying a suggestion like this produces a no-op fix, and worse, an
+    LLM asked to 'apply' a change with nothing real to change may invent
+    an unrelated edit instead of doing nothing. Only reject when the text
+    contains a self-certifying phrase (e.g. 'is correct', 'which is
+    correct', 'is already correct') and does NOT also propose a specific
+    replacement value, so a suggestion that says something is correct
+    while ALSO proposing a genuine adjacent fix still gets through."""
+    lower = desc.lower()
+    self_certifies = re.search(r'\bis (already )?correct\b', lower) or re.search(r'which is correct\b', lower)
+    if not self_certifies:
+        return False
+    proposes_change = re.search(r'\bshould (be|use|instead)\b|\binstead of\b|\breplace\b', lower)
+    if proposes_change:
+        return False
+    return True
 
 def _suggestion_falsely_claims_self_reference(logical_id, evidence, desc):
     """Reject suggestions asserting a resource's RedrivePolicy (or similar)
@@ -1592,10 +1614,16 @@ Rules for your answer:
         resource_ids = set(re.findall(r'^  ([A-Za-z0-9]+):\s*$', resources_text, flags=re.MULTILINE))
         if not resource_ids:
             resource_ids = set(re.findall(r'^\s{2}([A-Za-z0-9]+):\n\s{4}Type:', resources_text, flags=re.MULTILINE))
-        if not resource_ids:
-            resource_ids = set(re.findall(r'^\s{2}([A-Za-z0-9]+):\n\s{4}Type:', resources_text, flags=re.MULTILINE))
-        if logical_id not in resource_ids:
-            print(f"WARNING: discarding suggestion referencing '{logical_id}', which is not an actual Resources logical ID in this template: {text!r}")
+        # NEW: also accept Outputs: section keys as valid tags -- a suggestion
+        # about a truncated/malformed Output (e.g. a cut-off Export Name) is
+        # just as real as one about a Resource, but Outputs entries have no
+        # "Type:" line so they need their own extraction.
+        outputs_section_match = re.search(r'^Outputs:\s*\n(.*)\Z', template, flags=re.MULTILINE | re.DOTALL)
+        outputs_text = outputs_section_match.group(1) if outputs_section_match else ""
+        output_ids = set(re.findall(r'^  ([A-Za-z0-9]+):\s*$', outputs_text, flags=re.MULTILINE))
+        valid_ids = resource_ids | output_ids
+        if logical_id not in valid_ids:
+            print(f"WARNING: discarding suggestion referencing '{logical_id}', which is not an actual Resources or Outputs logical ID in this template: {text!r}")
             continue
 
         # NEW: require a quoted EVIDENCE line, copied verbatim from the
@@ -1604,7 +1632,7 @@ Rules for your answer:
         # about the template" hallucinations at once, instead of chasing
         # each new phrasing (missing/absent, should-instead-of, etc.) with
         # a separate keyword filter.
-        evidence_match = re.match(r'^EVIDENCE:\s*"(.+?)"\s*ISSUE:\s*(.+)$', rest, flags=re.DOTALL)
+        evidence_match = re.match(r'^EVIDENCE:\s*[`"](.+?)[`"]\s*ISSUE:\s*(.+)$', rest, flags=re.DOTALL)
         if not evidence_match:
             print(f"WARNING: discarding suggestion missing EVIDENCE/ISSUE tags: {text!r}")
             continue
@@ -1620,6 +1648,8 @@ Rules for your answer:
         print(f"DEBUG suggestion tag check: logical_id={logical_id!r} evidence={evidence[:80]!r} desc={desc[:120]!r}")
 
         def _normalize_ws(s):
+            s = s.replace('\\n', ' ')
+            s = s.replace('\\"', '"')
             return re.sub(r'\s+', ' ', s.strip())
 
         if _normalize_ws(evidence) not in _normalize_ws(template):
@@ -1649,6 +1679,9 @@ Rules for your answer:
             continue
         if _suggestion_is_vague_unfalsifiable_claim(text):
             print(f"WARNING: discarding vague/unfalsifiable suggestion (no concrete alternative named): {text!r}")
+            continue
+        if _suggestion_self_certifies_as_correct(text):
+            print(f"WARNING: discarding suggestion that certifies the current template as already correct: {text!r}")
             continue
         if _suggestion_falsely_claims_self_reference(logical_id, evidence, text):
             print(f"WARNING: discarding suggestion falsely claiming {logical_id} references itself/circular dependency: {text!r}")

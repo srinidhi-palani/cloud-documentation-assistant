@@ -1,4 +1,4 @@
-import re
+﻿import re
 import json
 import boto3
 from langchain_aws import ChatBedrock
@@ -282,7 +282,7 @@ def get_llm():
         model_id=BEDROCK_MODEL_ID,
         region_name=AWS_REGION,
         client=session.client("bedrock-runtime", region_name=AWS_REGION),
-        model_kwargs={"temperature": 0.4, "max_tokens": 4096},
+        model_kwargs={"temperature": 0.4, "max_tokens": 8192},
     )
     print(f"LLM initialized: Bedrock {BEDROCK_MODEL_ID}")
     return llm
@@ -1592,10 +1592,16 @@ Rules for your answer:
         resource_ids = set(re.findall(r'^  ([A-Za-z0-9]+):\s*$', resources_text, flags=re.MULTILINE))
         if not resource_ids:
             resource_ids = set(re.findall(r'^\s{2}([A-Za-z0-9]+):\n\s{4}Type:', resources_text, flags=re.MULTILINE))
-        if not resource_ids:
-            resource_ids = set(re.findall(r'^\s{2}([A-Za-z0-9]+):\n\s{4}Type:', resources_text, flags=re.MULTILINE))
-        if logical_id not in resource_ids:
-            print(f"WARNING: discarding suggestion referencing '{logical_id}', which is not an actual Resources logical ID in this template: {text!r}")
+        # NEW: also accept Outputs: section keys as valid tags -- a suggestion
+        # about a truncated/malformed Output (e.g. a cut-off Export Name) is
+        # just as real as one about a Resource, but Outputs entries have no
+        # "Type:" line so they need their own extraction.
+        outputs_section_match = re.search(r'^Outputs:\s*\n(.*)\Z', template, flags=re.MULTILINE | re.DOTALL)
+        outputs_text = outputs_section_match.group(1) if outputs_section_match else ""
+        output_ids = set(re.findall(r'^  ([A-Za-z0-9]+):\s*$', outputs_text, flags=re.MULTILINE))
+        valid_ids = resource_ids | output_ids
+        if logical_id not in valid_ids:
+            print(f"WARNING: discarding suggestion referencing '{logical_id}', which is not an actual Resources or Outputs logical ID in this template: {text!r}")
             continue
 
         # NEW: require a quoted EVIDENCE line, copied verbatim from the
@@ -1604,7 +1610,7 @@ Rules for your answer:
         # about the template" hallucinations at once, instead of chasing
         # each new phrasing (missing/absent, should-instead-of, etc.) with
         # a separate keyword filter.
-        evidence_match = re.match(r'^EVIDENCE:\s*"(.+?)"\s*ISSUE:\s*(.+)$', rest, flags=re.DOTALL)
+        evidence_match = re.match(r'^EVIDENCE:\s*[`"](.+?)[`"]\s*ISSUE:\s*(.+)$', rest, flags=re.DOTALL)
         if not evidence_match:
             print(f"WARNING: discarding suggestion missing EVIDENCE/ISSUE tags: {text!r}")
             continue
